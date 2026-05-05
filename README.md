@@ -33,18 +33,18 @@
 
 Integrating Supabase with Clerk gives you the benefits of using a Supabase database while leveraging Clerk's authentication, prebuilt components, and webhooks. To get the most out of Supabase with Clerk, you must implement custom [Row Level Security](https://supabase.com/docs/guides/auth/row-level-security) (RLS) policies.
 
-After following [the Clerk + Supabase integration guide](https://clerk.com/docs/integrations/databases/supabase), you will have learned how to:
+After following [the Clerk + Supabase integration guide](https://clerk.com/docs/guides/development/integrations/databases/supabase), you will have learned how to:
 
 - Enable the Supabase integration on your Clerk instance
 - Create RLS policies that restrict access to data based on the user's Clerk ID. This way, users can only access data that belongs to them.
 - Configure Clerk as a Supabase third-party auth provider
-- Use Clerk JWTs to authenticate Supabase queries in your Next.js app
+- Use Clerk session tokens with Supabase's third-party auth provider to authenticate queries in your Next.js app
 
 ## Deploy
 
 Easily deploy the template to Vercel with the button below. You will need to set the required environment variables in the Vercel dashboard.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fclerk%2Fclerk-supabase-nextjs&env=NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,CLERK_SECRET_KEY,CLERK_JWT_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_KEY&envLink=https%3A%2F%2Fclerk.com%2Fdocs%2Fdatabases%2Fintegrations%supabase&redirect-url=https%3A%2F%2Fclerk.com%2Fdocs%2Fdatabases%2Fintegrations%supabase)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fclerk%2Fclerk-supabase-nextjs&env=NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,CLERK_SECRET_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY&envLink=https%3A%2F%2Fclerk.com%2Fdocs%2Fguides%2Fdevelopment%2Fintegrations%2Fdatabases%2Fsupabase&redirect-url=https%3A%2F%2Fclerk.com%2Fdocs%2Fguides%2Fdevelopment%2Fintegrations%2Fdatabases%2Fsupabase)
 
 ## Running the template
 
@@ -62,7 +62,7 @@ To run the example locally, you need to:
 
 4. `npm install` the required dependencies.
 
-5. Follow [the Clerk + Supabase integration guide](https://clerk.com/docs/integrations/databases/supabase) to set up your Supabase database.
+5. Follow [the Clerk + Supabase integration guide](https://clerk.com/docs/guides/development/integrations/databases/supabase) to set up your Supabase database.
 
 6. `npm run dev` to launch the development server.
 
