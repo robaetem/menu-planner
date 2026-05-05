@@ -70,7 +70,7 @@ To run the example locally, you need to:
 
 To learn more about Clerk and Next.js, check out the following resources:
 
-- [Quickstart: Get started with Next.js and Clerk](https://clerk.com/docs/quickstarts/nextjs?utm_source=DevRel&utm_medium=docs&utm_campaign=templates&utm_content=clerk-supabase-nextjs)
+- [Quickstart: Get started with Next.js and Clerk](https://clerk.com/docs/nextjs/getting-started/quickstart?utm_source=DevRel&utm_medium=docs&utm_campaign=templates&utm_content=clerk-supabase-nextjs)
 
 - [Clerk Documentation](https://clerk.com/docs?utm_source=DevRel&utm_medium=docs&utm_campaign=templates&utm_content=clerk-supabase-nextjs)
 - [Next.js Documentation](https://nextjs.org/docs)
