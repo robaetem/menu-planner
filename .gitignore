@@ -33,3 +33,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local working notes (not for the public repo)
+HANDOFF.md
+
+# local verification artifacts (Playwright snapshots / screenshots)
+.playwright-mcp/

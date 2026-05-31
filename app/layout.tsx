@@ -18,7 +18,7 @@ export default function RootLayout({
         <body>
           <header>
             <SignedOut>
-              <SignInButton />
+              <SignInButton forceRedirectUrl="/" signUpForceRedirectUrl="/" />
             </SignedOut>
             <SignedIn>
               <UserButton />
