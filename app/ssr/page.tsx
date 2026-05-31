@@ -1,6 +1,10 @@
 import { createServerSupabaseClient } from "./client";
 import AddTaskForm from "./AddTaskForm";
 
+// Reads the per-request Clerk session token (uses headers), so this route
+// must be rendered dynamically rather than statically prerendered at build.
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   // Use the custom Supabase client you created
   const client = createServerSupabaseClient();
