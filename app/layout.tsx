@@ -1,8 +1,7 @@
 import {
   ClerkProvider,
+  Show,
   SignInButton,
-  SignedIn,
-  SignedOut,
   UserButton,
 } from "@clerk/nextjs";
 import "./globals.css";
@@ -13,20 +12,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider>
-      <html lang="en">
-        <body>
+    <html lang="en">
+      <body>
+        <ClerkProvider>
           <header>
-            <SignedOut>
+            <Show when="signed-out">
               <SignInButton forceRedirectUrl="/" signUpForceRedirectUrl="/" />
-            </SignedOut>
-            <SignedIn>
+            </Show>
+            <Show when="signed-in">
               <UserButton />
-            </SignedIn>
+            </Show>
           </header>
           <main>{children}</main>
-        </body>
-      </html>
-    </ClerkProvider>
+        </ClerkProvider>
+      </body>
+    </html>
   );
 }
