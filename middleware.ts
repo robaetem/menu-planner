@@ -5,6 +5,12 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 // APIs are available — middleware runs on the Edge runtime and can't use them.
 export default clerkMiddleware();
 
+// Run on the Node.js runtime (stable since Next.js 15.5) so Clerk's Node-only
+// modules (#crypto, #safe-node-apis) work — the Edge runtime rejects them on
+// Vercel. NOTE: this is only honored by Vercel's Git build pipeline, not the
+// `vercel` CLI deploy (which forces Edge — see vercel/vercel#13248).
+export const runtime = "nodejs";
+
 export const config = {
   matcher: [
     // Skip Next.js internals and all static files, unless found in search params
