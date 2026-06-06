@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
-import type { Household, PlanDayWithMeals, PlanningDay, RecipeWithIngredients } from "@/lib/types";
+import type { Household, PlanDayWithMeals, PlanningDay, Potje, RecipeWithIngredients } from "@/lib/types";
 
 const DEFAULT_DINERS = [
   { key: "robin", label: "Robin" },
@@ -34,6 +34,16 @@ export async function listRecipes(): Promise<RecipeWithIngredients[]> {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data || []).map((r) => sortIngredients(r as RecipeWithIngredients));
+}
+
+export async function listPotjes(): Promise<Potje[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("potjes")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as Potje[];
 }
 
 export async function getRecipe(id: string): Promise<RecipeWithIngredients | null> {

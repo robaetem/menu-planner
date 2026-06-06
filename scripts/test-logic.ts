@@ -59,10 +59,10 @@ const days: any[] = [
 ];
 const res = computeShoppingList(days, ingredientsByRecipe);
 const byKey = Object.fromEntries(res.all.map((l) => [l.key, formatQuantity(l)]));
-eq("aardappelen merged 900 g", byKey["aardappelen|g"], "900 g");
-eq("wortels 700 g", byKey["wortels|g"], "700 g");
+eq("aardappelen merged 900 g", byKey["aardappelen|gram"], "900 g");
+eq("wortels 700 g", byKey["wortels|gram"], "700 g");
 eq("hamburger 3 stuk (Robin>Amber, potjes ignored)", byKey["hamburger|stuk"], "3 stuk");
-eq("gehakt 1000 g (amount_max)", byKey["gehakt|g"], "1000 g");
+eq("gehakt 1000 g (amount_max)", byKey["gehakt|gram"], "1000 g");
 eq("bonen 3 blik", byKey["bonen in tomatensaus|blik"], "3 blik");
 eq("tomatenstukjes 1 blik (fixed)", byKey["tomatenstukjes|blik"], "1 blik");
 eq("from_freezer ignored", res.mealsFromFreezer, 1);

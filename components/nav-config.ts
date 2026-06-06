@@ -1,4 +1,4 @@
-import { CalendarDays, BookOpen, type LucideIcon } from "lucide-react";
+import { CalendarDays, BookOpen, Snowflake, type LucideIcon } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -19,5 +19,11 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/recepten",
     icon: BookOpen,
     description: "Receptendatabank",
+  },
+  {
+    title: "Potjes",
+    href: "/potjes",
+    icon: Snowflake,
+    description: "Diepvriesvoorraad",
   },
 ];

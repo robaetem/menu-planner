@@ -19,10 +19,12 @@ export function MealCard({
   meal,
   full,
   diners,
+  onView,
 }: {
   meal: PlanMealWithRecipe;
   full: boolean;
   diners: Diner[];
+  onView: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -43,11 +45,12 @@ export function MealCard({
 
   return (
     <div
+      onClick={onView}
       className={cn(
-        "h-full rounded-lg border p-3 transition-colors",
+        "h-full cursor-pointer rounded-lg border p-3 transition-colors",
         potje
-          ? "border-sky-300 bg-sky-100/70 dark:border-sky-900 dark:bg-sky-950/30"
-          : "border-amber-300 bg-amber-100/70 dark:border-amber-900/70 dark:bg-amber-950/30",
+          ? "border-sky-300 bg-sky-100/70 hover:border-sky-400 dark:border-sky-900 dark:bg-sky-950/30"
+          : "border-amber-300 bg-amber-100/70 hover:border-amber-400 dark:border-amber-900/70 dark:bg-amber-950/30",
         pending && "opacity-60",
         full ? "" : "min-h-[4.25rem]",
       )}
@@ -55,7 +58,10 @@ export function MealCard({
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium leading-snug text-foreground">{title}</p>
         <button
-          onClick={() => run(() => deleteMeal(meal.id))}
+          onClick={(e) => {
+            e.stopPropagation();
+            run(() => deleteMeal(meal.id));
+          }}
           className="shrink-0 text-foreground/40 transition-colors hover:text-destructive"
           aria-label="Maaltijd verwijderen"
         >
@@ -86,6 +92,7 @@ function PotjesControl({ value, onChange }: { value: number; onChange: (n: numbe
       <PopoverTrigger
         render={
           <button
+            onClick={(e) => e.stopPropagation()}
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
               n > 0
@@ -98,7 +105,7 @@ function PotjesControl({ value, onChange }: { value: number; onChange: (n: numbe
         <Snowflake className="size-3" />
         {n > 0 ? `+${n} ${n === 1 ? "potje" : "potjes"}` : "potje"}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto p-2.5">
+      <PopoverContent align="start" className="w-auto p-2.5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon-sm" onClick={() => onChange(Math.max(0, n - 1))} disabled={n <= 0} aria-label="Minder">
             <Minus className="size-3.5" />

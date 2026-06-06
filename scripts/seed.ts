@@ -1,10 +1,10 @@
-/* Seed demo data for the single rolling plan: 8 recipes + a few days from today
-   with assigned meals (Samen / Amber / Robin), modes, potjes and potje-diepvries.
+/* Seed demo data: recipes (tags + structured ingredients with units stuk/gram/
+   dl/cl/ml), a freezer inventory (potjes), and a few planned days from today.
    Run: corepack pnpm dlx tsx scripts/seed.ts */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "fs";
-import { parseIngredientsText, toIngredientRows } from "../lib/recipes/ingredient-parser";
 import { addIsoDays, todayIso } from "../lib/date";
+import type { IngredientRow } from "../lib/types";
 
 const env = Object.fromEntries(
   readFileSync(".env.local", "utf8")
@@ -19,33 +19,84 @@ const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
   auth: { persistSession: false },
 });
 
-type R = {
-  title: string;
-  prep: number | null;
-  fresh: boolean;
-  freezer: boolean;
-  tags: string[];
-  base: number;
-  ingredients: string;
-};
+const HOUSEHOLD = 2;
+type SeedIng = { name: string; unit: string; samen?: number; amber?: number; robin?: number };
+type R = { title: string; tags: string[]; ingredients: SeedIng[]; method?: string };
+
+function toRows(ings: SeedIng[]): Omit<IngredientRow, never>[] {
+  return ings.map((ig, i) => {
+    const base = { name: ig.name, unit: ig.unit, is_fresh: false, sort: i };
+    if (ig.amber != null || ig.robin != null) {
+      const pp: Record<string, number> = {};
+      if (ig.robin != null) pp.robin = ig.robin;
+      if (ig.amber != null) pp.amber = ig.amber;
+      return { ...base, scaling: "per_person", amount: null, amount_max: null, amounts_per_person: pp };
+    }
+    return { ...base, scaling: "per_serving", amount: ig.samen != null ? ig.samen / HOUSEHOLD : null, amount_max: null, amounts_per_person: {} };
+  });
+}
 
 const RECIPES: R[] = [
-  { title: "Wortelpuree met hamburgers", prep: 30, fresh: true, freezer: false, tags: ["klassieker"], base: 2,
-    ingredients: `Robin 2 / Amber 1 stuk hamburger\n350 g wortels *\n300 g aardappelen` },
-  { title: "Balletjes in tomatensaus", prep: 40, fresh: false, freezer: true, tags: ["comfort", "klassieker"], base: 2,
-    ingredients: `450-500 g gehakt\n1,5 blik bonen in tomatensaus\nvast: 1 blik tomatenstukjes\n150 g aardappelen` },
-  { title: "Wraps met ratatouille en ei", prep: 20, fresh: true, freezer: false, tags: ["snel", "vegetarisch"], base: 2,
-    ingredients: `Robin 3 / Amber 2 stuk wraps\n1 stuk courgette *\n1 stuk aubergine *\n2 stuk paprika *\nRobin 2 / Amber 1 stuk ei\nvast: 1 blik passata` },
-  { title: "Quiche lorraine met bloemkool", prep: 45, fresh: false, freezer: true, tags: ["oven", "klassieker"], base: 2,
-    ingredients: `150 g spekblokjes\n4 stuk eieren\n200 ml room\n1 stuk bloemkool *\n100 g geraspte kaas\nvast: 1 rol bladerdeeg` },
-  { title: "Spaghetti bolognese", prep: 35, fresh: false, freezer: true, tags: ["pasta", "klassieker", "comfort"], base: 2,
-    ingredients: `250 g spaghetti\n500 g gehakt\nvast: 1 blik tomatenstukjes\n1 stuk ui *\n2 teen knoflook` },
-  { title: "Kip curry met rijst", prep: 30, fresh: true, freezer: false, tags: ["snel", "kip"], base: 2,
-    ingredients: `Robin 2 / Amber 1 stuk kipfilet\n250 g rijst\n1 blik kokosmelk\n2 el currypasta\n2 stuk paprika *` },
-  { title: "Tomatensoep met balletjes", prep: 25, fresh: true, freezer: true, tags: ["soep", "snel"], base: 2,
-    ingredients: `1 kg tomaten *\n1 stuk ui *\nvast: 1 blik tomatenstukjes\n200 g gehakt\n500 ml bouillon` },
-  { title: "Stoofvlees met frietjes", prep: 150, fresh: false, freezer: true, tags: ["traag", "comfort", "klassieker"], base: 2,
-    ingredients: `800 g stoofvlees\n2 stuk ui\n1 fles bruin bier\n1 kg frietjes` },
+  { title: "Wortelpuree met hamburgers", tags: ["verse groenten"], ingredients: [
+    { name: "hamburger", unit: "stuk", amber: 1, robin: 2 },
+    { name: "wortels", unit: "gram", samen: 350 },
+    { name: "aardappelen", unit: "gram", samen: 300 },
+  ] },
+  { title: "Balletjes in tomatensaus", tags: ["diepvriesvriendelijk", "winter"], ingredients: [
+    { name: "gehakt", unit: "gram", samen: 500 },
+    { name: "bonen in tomatensaus", unit: "stuk", samen: 2 },
+    { name: "tomatenstukjes", unit: "stuk", samen: 1 },
+    { name: "aardappelen", unit: "gram", samen: 300 },
+  ] },
+  { title: "Wraps met ratatouille en ei", tags: ["snel", "verse groenten", "zomer"], ingredients: [
+    { name: "wraps", unit: "stuk", amber: 2, robin: 3 },
+    { name: "courgette", unit: "stuk", samen: 1 },
+    { name: "aubergine", unit: "stuk", samen: 1 },
+    { name: "paprika", unit: "stuk", samen: 2 },
+    { name: "ei", unit: "stuk", amber: 1, robin: 2 },
+    { name: "passata", unit: "stuk", samen: 1 },
+  ] },
+  { title: "Quiche lorraine met bloemkool", tags: ["diepvriesvriendelijk", "winter"], ingredients: [
+    { name: "spekblokjes", unit: "gram", samen: 150 },
+    { name: "eieren", unit: "stuk", samen: 4 },
+    { name: "room", unit: "ml", samen: 200 },
+    { name: "bloemkool", unit: "stuk", samen: 1 },
+    { name: "geraspte kaas", unit: "gram", samen: 100 },
+    { name: "bladerdeeg", unit: "stuk", samen: 1 },
+  ] },
+  { title: "Spaghetti bolognese", tags: ["pasta", "diepvriesvriendelijk"], ingredients: [
+    { name: "spaghetti", unit: "gram", samen: 250 },
+    { name: "gehakt", unit: "gram", samen: 500 },
+    { name: "tomatenstukjes", unit: "stuk", samen: 1 },
+    { name: "ui", unit: "stuk", samen: 1 },
+    { name: "knoflook", unit: "stuk", samen: 2 },
+  ] },
+  { title: "Kip curry met rijst", tags: ["snel"], ingredients: [
+    { name: "kipfilet", unit: "stuk", amber: 1, robin: 2 },
+    { name: "rijst", unit: "gram", samen: 250 },
+    { name: "kokosmelk", unit: "stuk", samen: 1 },
+    { name: "currypasta", unit: "gram", samen: 40 },
+    { name: "paprika", unit: "stuk", samen: 2 },
+  ] },
+  { title: "Tomatensoep met balletjes", tags: ["snel", "verse groenten", "diepvriesvriendelijk"], ingredients: [
+    { name: "tomaten", unit: "gram", samen: 1000 },
+    { name: "ui", unit: "stuk", samen: 1 },
+    { name: "tomatenstukjes", unit: "stuk", samen: 1 },
+    { name: "gehakt", unit: "gram", samen: 200 },
+    { name: "bouillon", unit: "ml", samen: 500 },
+  ] },
+  { title: "Stoofvlees met frietjes", tags: ["winter", "diepvriesvriendelijk"], ingredients: [
+    { name: "stoofvlees", unit: "gram", samen: 800 },
+    { name: "ui", unit: "stuk", samen: 2 },
+    { name: "bruin bier", unit: "stuk", samen: 1 },
+    { name: "frietjes", unit: "gram", samen: 1000 },
+  ] },
+];
+
+const POTJES = [
+  { name: "Opgevulde tomaten", robin: 2, amber: 4 },
+  { name: "Gehaktballetjes in tomatensaus", robin: 3, amber: 3 },
+  { name: "Stoofvlees", robin: 1, amber: 1 },
 ];
 
 type Assignee = "both" | "amber" | "robin";
@@ -55,41 +106,57 @@ function dinersFor(a: Assignee) {
   return { keys: ["robin", "amber"], count: 2 };
 }
 
-type MealSpec = { assignee: Assignee; recipe?: string; potje?: boolean; potjes?: number };
+type MealSpec = { assignee: Assignee; recipe?: string; potje?: string; potjes?: number };
 type DaySpec = { offset: number; amber_mode?: string; robin_mode?: string; meals: MealSpec[] };
 
 const PLAN: DaySpec[] = [
   { offset: 0, amber_mode: "Vrije middag", robin_mode: "Leuven", meals: [{ assignee: "both", recipe: "Wraps met ratatouille en ei" }] },
-  { offset: 1, meals: [{ assignee: "amber", potje: true }, { assignee: "robin", potje: true }] },
-  { offset: 2, amber_mode: "24 uur", meals: [{ assignee: "amber", potje: true }, { assignee: "robin", recipe: "Wortelpuree met hamburgers", potjes: 2 }] },
+  { offset: 1, meals: [{ assignee: "amber", potje: "Opgevulde tomaten" }, { assignee: "robin", potje: "Gehaktballetjes in tomatensaus" }] },
+  { offset: 2, amber_mode: "24 uur", meals: [{ assignee: "amber", potje: "Opgevulde tomaten" }, { assignee: "robin", recipe: "Wortelpuree met hamburgers", potjes: 2 }] },
   { offset: 3, meals: [{ assignee: "both", recipe: "Balletjes in tomatensaus", potjes: 2 }] },
 ];
 
 async function main() {
-  console.log("Clearing recipes + plan_days…");
+  console.log("Clearing recipes + plan_days + potjes…");
   await db.from("plan_days").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await db.from("potjes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await db.from("recipes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await db.from("household").update({ plan_horizon: null }).neq("id", "00000000-0000-0000-0000-000000000000");
 
-  const idByTitle: Record<string, string> = {};
+  const recipeId: Record<string, string> = {};
   for (const r of RECIPES) {
     const { data: rec, error } = await db
       .from("recipes")
-      .insert({ title: r.title, prep_minutes: r.prep, uses_fresh_veg: r.fresh, freezer_friendly: r.freezer, tags: r.tags, base_servings: r.base })
+      .insert({
+        title: r.title,
+        tags: r.tags,
+        prep_minutes: null,
+        base_servings: 2,
+        uses_fresh_veg: r.tags.includes("verse groenten"),
+        freezer_friendly: r.tags.includes("diepvriesvriendelijk"),
+        method: r.method ?? null,
+      })
       .select("id")
       .single();
     if (error) throw error;
-    idByTitle[r.title] = rec.id;
-    const rows = toIngredientRows(parseIngredientsText(r.ingredients), r.base).map((x) => ({ ...x, recipe_id: rec.id }));
+    recipeId[r.title] = rec.id;
+    const rows = toRows(r.ingredients).map((x) => ({ ...x, recipe_id: rec.id }));
     if (rows.length) {
       const { error: e2 } = await db.from("ingredients").insert(rows);
       if (e2) throw e2;
     }
-    console.log(`  + ${r.title} (${rows.length})`);
+    console.log(`  recipe + ${r.title}`);
+  }
+
+  const potje: Record<string, { id: string; robin: number; amber: number }> = {};
+  for (const p of POTJES) {
+    const { data, error } = await db.from("potjes").insert({ name: p.name, robin_count: p.robin, amber_count: p.amber }).select("id").single();
+    if (error) throw error;
+    potje[p.name] = { id: data.id, robin: p.robin, amber: p.amber };
+    console.log(`  potje + ${p.name}`);
   }
 
   const today = todayIso();
-  console.log(`Creating plan days from ${today}…`);
   for (const day of PLAN) {
     const date = addIsoDays(today, day.offset);
     const { data: d, error: de } = await db
@@ -101,13 +168,20 @@ async function main() {
     let sort = 0;
     for (const m of day.meals) {
       const dn = dinersFor(m.assignee);
+      const isPotje = !!m.potje;
+      const pj = isPotje ? potje[m.potje!] : null;
+      if (isPotje && pj) {
+        if (dn.keys.includes("robin")) pj.robin -= 1;
+        if (dn.keys.includes("amber")) pj.amber -= 1;
+      }
       const { error: me } = await db.from("plan_meals").insert({
         plan_day_id: d.id,
         assignee: m.assignee,
-        from_freezer: !!m.potje,
-        recipe_id: m.recipe ? idByTitle[m.recipe] : null,
-        freeform_title: m.potje ? "Potje diepvries" : m.recipe ?? "Gerecht",
-        raw_text: m.potje ? "Potje diepvries" : m.recipe ?? "",
+        from_freezer: isPotje,
+        recipe_id: m.recipe ? recipeId[m.recipe] : null,
+        potje_id: pj?.id ?? null,
+        freeform_title: isPotje ? m.potje : m.recipe ?? "Gerecht",
+        raw_text: isPotje ? m.potje! : m.recipe ?? "",
         diner_keys: dn.keys,
         diner_count: dn.count,
         freezer_servings: m.potjes ?? 0,
@@ -115,8 +189,14 @@ async function main() {
       });
       if (me) throw me;
     }
-    console.log(`  + ${date} (${day.meals.length} maaltijd(en))`);
+    console.log(`  day + ${date}`);
   }
+
+  for (const p of POTJES) {
+    const pj = potje[p.name];
+    await db.from("potjes").update({ robin_count: Math.max(0, pj.robin), amber_count: Math.max(0, pj.amber) }).eq("id", pj.id);
+  }
+
   console.log("\nSeed complete.");
 }
 

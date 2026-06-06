@@ -121,7 +121,7 @@ export function AppShell({
 
       {/* Mobile bottom navigation */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-2">
+        <div className="mx-auto grid max-w-md grid-cols-3">
           {NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
             return (

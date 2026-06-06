@@ -7,24 +7,32 @@ import { toast } from "sonner";
 import { CalendarPlus, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Diner, PlanningDay, RecipeWithIngredients } from "@/lib/types";
+import type { Diner, PlanMealWithRecipe, PlanningDay, Potje, RecipeWithIngredients } from "@/lib/types";
 import { DayCard } from "./day-card";
 import { ShoppingSheet } from "./shopping-sheet";
+import { MealDetailDialog } from "./meal-detail-dialog";
 import { extendDays } from "./actions";
 
 export function PlanningView({
   days,
   recipes,
   diners,
+  potjes,
 }: {
   days: PlanningDay[];
   recipes: RecipeWithIngredients[];
   diners: Diner[];
+  potjes: Potje[];
 }) {
   const router = useRouter();
   const [extending, startExtend] = useTransition();
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [shopOpen, setShopOpen] = React.useState(false);
+  const [viewing, setViewing] = React.useState<PlanMealWithRecipe | null>(null);
+
+  const viewingRecipe = viewing?.recipe_id
+    ? recipes.find((r) => r.id === viewing.recipe_id) ?? null
+    : null;
 
   function toggle(date: string) {
     setSelected((prev) => {
@@ -69,8 +77,10 @@ export function PlanningView({
             key={d.day_date}
             planningDay={d}
             diners={diners}
+            potjes={potjes}
             selected={selected.has(d.day_date)}
             onToggleSelect={() => toggle(d.day_date)}
+            onViewMeal={(m) => setViewing(m)}
           />
         ))}
       </div>
@@ -80,6 +90,14 @@ export function PlanningView({
       </Button>
 
       <ShoppingSheet open={shopOpen} onOpenChange={setShopOpen} days={selectedDays} recipes={recipes} />
+
+      <MealDetailDialog
+        meal={viewing}
+        recipe={viewingRecipe}
+        diners={diners}
+        open={viewing !== null}
+        onOpenChange={(o) => !o && setViewing(null)}
+      />
     </div>
   );
 }

@@ -45,13 +45,26 @@ export type Recipe = {
 
 export type RecipeWithIngredients = Recipe & { ingredients: Ingredient[] };
 
+/** A persisted ingredient minus its DB identifiers (used when (re)writing rows). */
+export type IngredientRow = Omit<Ingredient, "id" | "recipe_id">;
+
 /** Who a meal is for: Samen (both, full-width) or a single person (half-width). */
 export type Assignee = "both" | "amber" | "robin";
+
+export type Potje = {
+  id: string;
+  name: string;
+  robin_count: number;
+  amber_count: number;
+  sort: number;
+  created_at: string;
+};
 
 export type PlanMeal = {
   id: string;
   plan_day_id: string;
   recipe_id: string | null;
+  potje_id: string | null;
   assignee: Assignee;
   raw_text: string;
   freeform_title: string | null;

@@ -47,9 +47,24 @@ export async function setMode(
 }
 
 // ------------------------------------------------------------------ meals ----
-/** "Potje diepvries" — eat from the freezer (blue card, no recipe, buys nothing). */
-export async function addPotje(dayDate: string, assignee: Assignee): Promise<void> {
+function needs(assignee: Assignee): { robin: boolean; amber: boolean } {
+  return { robin: assignee === "both" || assignee === "robin", amber: assignee === "both" || assignee === "amber" };
+}
+
+/** "Potje diepvries" — take a specific potje from the freezer inventory and
+ *  decrement its count for the eating person(s) (blue card, buys nothing). */
+export async function addPotjeFromInventory(
+  dayDate: string,
+  assignee: Assignee,
+  potjeId: string,
+): Promise<void> {
   const db = getDb();
+  const { data: potje } = await db.from("potjes").select("*").eq("id", potjeId).maybeSingle();
+  if (!potje) throw new Error("Potje niet gevonden");
+  const n = needs(assignee);
+  if ((n.robin && potje.robin_count < 1) || (n.amber && potje.amber_count < 1)) {
+    throw new Error("Geen potje beschikbaar");
+  }
   const dayId = await ensureDay(db, dayDate);
   const d = dinersFor(assignee);
   const { error } = await db.from("plan_meals").insert({
@@ -57,15 +72,21 @@ export async function addPotje(dayDate: string, assignee: Assignee): Promise<voi
     assignee,
     from_freezer: true,
     recipe_id: null,
-    freeform_title: "Potje diepvries",
-    raw_text: "Potje diepvries",
+    potje_id: potjeId,
+    freeform_title: potje.name,
+    raw_text: potje.name,
     diner_keys: d.diner_keys,
     diner_count: d.diner_count,
     freezer_servings: 0,
     sort: await nextSort(db, dayId),
   });
   if (error) throw error;
+  const patch: Record<string, number> = {};
+  if (n.robin) patch.robin_count = potje.robin_count - 1;
+  if (n.amber) patch.amber_count = potje.amber_count - 1;
+  await db.from("potjes").update(patch).eq("id", potjeId);
   revalidatePath("/planning");
+  revalidatePath("/potjes");
 }
 
 /** "Gerecht" — assign a recipe to the day (yellow card). */
@@ -92,9 +113,27 @@ export async function assignRecipe(dayDate: string, assignee: Assignee, recipeId
 
 export async function deleteMeal(mealId: string): Promise<void> {
   const db = getDb();
+  const { data: meal } = await db
+    .from("plan_meals")
+    .select("potje_id, assignee")
+    .eq("id", mealId)
+    .maybeSingle();
   const { error } = await db.from("plan_meals").delete().eq("id", mealId);
   if (error) throw error;
+
+  // Return the potje to the freezer inventory if this was a potje meal.
+  if (meal?.potje_id) {
+    const { data: potje } = await db.from("potjes").select("*").eq("id", meal.potje_id).maybeSingle();
+    if (potje) {
+      const n = needs(meal.assignee as Assignee);
+      const patch: Record<string, number> = {};
+      if (n.robin) patch.robin_count = potje.robin_count + 1;
+      if (n.amber) patch.amber_count = potje.amber_count + 1;
+      await db.from("potjes").update(patch).eq("id", meal.potje_id);
+    }
+  }
   revalidatePath("/planning");
+  revalidatePath("/potjes");
 }
 
 export async function setMealPotjes(mealId: string, n: number): Promise<void> {

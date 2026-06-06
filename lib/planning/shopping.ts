@@ -32,8 +32,23 @@ export type ShoppingResult = {
 
 const COUNTABLE = new Set(["stuk", "blik", "teen", "bos", "pak", "zak", "snee", "plak", "pot", "bol"]);
 
+// Reconcile unit spellings so the same ingredient merges regardless of which
+// write path produced it (the editor uses "gram"/"stuk"/…, older data may use
+// "g"/"stuks"/…).
+const UNIT_CANON: Record<string, string> = {
+  g: "gram", gr: "gram", gram: "gram", grams: "gram", grammen: "gram",
+  kg: "kg", kilo: "kg", kilogram: "kg",
+  l: "l", liter: "l", liters: "l",
+  ml: "ml", cl: "cl", dl: "dl",
+  stuk: "stuk", stuks: "stuk", st: "stuk",
+};
+export function normalizeUnit(unit: string): string {
+  const v = (unit || "").trim().toLowerCase();
+  return UNIT_CANON[v] ?? v;
+}
+
 export function lineKey(name: string, unit: string): string {
-  return `${name.trim().toLowerCase()}|${unit.trim().toLowerCase()}`;
+  return `${name.trim().toLowerCase()}|${normalizeUnit(unit)}`;
 }
 
 export function computeShoppingList(
@@ -114,7 +129,7 @@ export function computeShoppingList(
 export function formatQuantity(line: Pick<ShoppingLine, "total" | "unit" | "hasNumeric">): string {
   if (!line.hasNumeric || line.total == null) return "";
   let n = line.total;
-  if (COUNTABLE.has(line.unit.toLowerCase())) n = Math.ceil(n - 1e-9);
+  if (COUNTABLE.has(normalizeUnit(line.unit))) n = Math.ceil(n - 1e-9);
   else n = Math.round(n * 10) / 10;
   const s = Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
   return line.unit ? `${s} ${line.unit}` : s;

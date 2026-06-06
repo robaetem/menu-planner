@@ -17,25 +17,26 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { rankRecipes } from "@/lib/recipes/ranker";
+import { RECIPE_TAGS } from "@/lib/recipes/tags";
 import { formatDayLabel } from "@/lib/date";
 import type { Assignee, RecipeWithIngredients } from "@/lib/types";
 import { RecipeCard } from "./recipe-card";
 import { RecipeEditorDialog } from "./recipe-editor-dialog";
-import { RecipeDetailDialog } from "./recipe-detail-dialog";
 import { deleteRecipe } from "./actions";
 import { assignRecipe } from "../planning/actions";
 import { assigneeLabel } from "../planning/config";
 
 export type AssignTarget = { date: string; who: Assignee };
 
-const CHIPS = [
-  { label: "Snel", token: "snel" },
-  { label: "Verse groenten", token: "verse groenten" },
-  { label: "Vriezer", token: "vriezer" },
-  { label: "Oven", token: "oven" },
-  { label: "Vega", token: "vegetarisch" },
-];
+function fold(s: string): string {
+  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+function matchesSearch(r: RecipeWithIngredients, query: string): boolean {
+  const q = fold(query.trim());
+  if (!q) return true;
+  const hay = fold([r.title, r.tags.join(" "), r.ingredients.map((i) => i.name).join(" ")].join(" "));
+  return q.split(/\s+/).every((tok) => hay.includes(tok));
+}
 
 export function RecipesView({
   recipes,
@@ -49,7 +50,6 @@ export function RecipesView({
   const [chips, setChips] = React.useState<Set<string>>(new Set());
 
   const [editing, setEditing] = React.useState<RecipeWithIngredients | null | "new">(null);
-  const [viewing, setViewing] = React.useState<RecipeWithIngredients | null>(null);
   const [deleting, setDeleting] = React.useState<RecipeWithIngredients | null>(null);
   const [deletePending, setDeletePending] = React.useState(false);
   const [assigning, setAssigning] = React.useState(false);
@@ -70,25 +70,23 @@ export function RecipesView({
 
   function onCardOpen(r: RecipeWithIngredients) {
     if (assign) assignToDay(r);
-    else setViewing(r);
+    else setEditing(r);
   }
 
-  const effectiveQuery = React.useMemo(
-    () => [query, ...chips].filter(Boolean).join(" "),
-    [query, chips],
-  );
-  const results = React.useMemo(
-    () => rankRecipes(recipes, effectiveQuery),
-    [recipes, effectiveQuery],
-  );
+  const results = React.useMemo(() => {
+    const selected = [...chips];
+    return recipes
+      .filter((r) => selected.every((tag) => r.tags.includes(tag)))
+      .filter((r) => matchesSearch(r, query));
+  }, [recipes, chips, query]);
 
-  const hasFilter = effectiveQuery.trim().length > 0;
+  const hasFilter = query.trim().length > 0 || chips.size > 0;
 
-  function toggleChip(token: string) {
+  function toggleChip(tag: string) {
     setChips((prev) => {
       const next = new Set(prev);
-      if (next.has(token)) next.delete(token);
-      else next.add(token);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
       return next;
     });
   }
@@ -105,7 +103,6 @@ export function RecipesView({
       await deleteRecipe(deleting.id);
       toast.success("Recept verwijderd");
       setDeleting(null);
-      setViewing(null);
       router.refresh();
     } catch (e) {
       toast.error("Verwijderen mislukt.");
@@ -154,7 +151,7 @@ export function RecipesView({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zoek of beschrijf wat je wil eten… (bv. 'iets snel met verse groenten')"
+            placeholder="Zoeken..."
             className="h-11 pl-9 pr-9 text-[0.95rem]"
           />
           {query && (
@@ -168,12 +165,12 @@ export function RecipesView({
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {CHIPS.map((c) => {
-            const active = chips.has(c.token);
+          {RECIPE_TAGS.map((c) => {
+            const active = chips.has(c.value);
             return (
               <button
-                key={c.token}
-                onClick={() => toggleChip(c.token)}
+                key={c.value}
+                onClick={() => toggleChip(c.value)}
                 className={cn(
                   "rounded-full border px-3 py-1 text-sm font-medium transition-colors",
                   active
@@ -234,19 +231,6 @@ export function RecipesView({
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         recipe={editing === "new" ? null : editing}
-      />
-      <RecipeDetailDialog
-        recipe={viewing}
-        open={viewing !== null}
-        onOpenChange={(o) => !o && setViewing(null)}
-        onEdit={() => {
-          const r = viewing;
-          setViewing(null);
-          setEditing(r);
-        }}
-        onDelete={() => {
-          setDeleting(viewing);
-        }}
       />
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>

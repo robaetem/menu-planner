@@ -2,7 +2,7 @@
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatDayLabel } from "@/lib/date";
-import type { Diner, PlanningDay } from "@/lib/types";
+import type { Diner, PlanMealWithRecipe, PlanningDay, Potje } from "@/lib/types";
 import { ModePill } from "./mode-pill";
 import { MealCard } from "./meal-card";
 import { AddMealButton } from "./add-meal-buttons";
@@ -11,13 +11,17 @@ import { AMBER_MODES, ROBIN_MODES } from "./config";
 export function DayCard({
   planningDay,
   diners,
+  potjes,
   selected,
   onToggleSelect,
+  onViewMeal,
 }: {
   planningDay: PlanningDay;
   diners: Diner[];
+  potjes: Potje[];
   selected: boolean;
   onToggleSelect: () => void;
+  onViewMeal: (meal: PlanMealWithRecipe) => void;
 }) {
   const { day_date, row } = planningDay;
   const meals = row?.meals ?? [];
@@ -49,7 +53,7 @@ export function DayCard({
 
       <div className="space-y-2">
         {both.map((m) => (
-          <MealCard key={m.id} meal={m} full diners={diners} />
+          <MealCard key={m.id} meal={m} full diners={diners} onView={() => onViewMeal(m)} />
         ))}
 
         {both.length === 0 && (
@@ -57,25 +61,25 @@ export function DayCard({
             {amber.length ? (
               <div className="space-y-2">
                 {amber.map((m) => (
-                  <MealCard key={m.id} meal={m} full={false} diners={diners} />
+                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} />
                 ))}
               </div>
             ) : (
-              <AddMealButton dayDate={day_date} who="amber" />
+              <AddMealButton dayDate={day_date} who="amber" potjes={potjes} />
             )}
             {robin.length ? (
               <div className="space-y-2">
                 {robin.map((m) => (
-                  <MealCard key={m.id} meal={m} full={false} diners={diners} />
+                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} />
                 ))}
               </div>
             ) : (
-              <AddMealButton dayDate={day_date} who="robin" />
+              <AddMealButton dayDate={day_date} who="robin" potjes={potjes} />
             )}
           </div>
         )}
 
-        {empty && <AddMealButton dayDate={day_date} who="both" full />}
+        {empty && <AddMealButton dayDate={day_date} who="both" full potjes={potjes} />}
       </div>
     </div>
   );
