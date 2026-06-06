@@ -39,3 +39,6 @@ HANDOFF.md
 
 # local verification artifacts (Playwright snapshots / screenshots)
 .playwright-mcp/
+
+# Local validation screenshots (agent-browser)
+.screenshots/
