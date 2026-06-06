@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, MoreVertical, Trash2 } from "lucide-react";
+import { MoreVertical, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +16,8 @@ import {
 import { formatDayLabel } from "@/lib/date";
 import type { Diner, PlanDayWithMeals, RecipeWithIngredients } from "@/lib/types";
 import { MealRow } from "./meal-row";
-import { addMeal, removeDay, updateDay } from "../actions";
+import { MealAutocomplete } from "./meal-autocomplete";
+import { removeDay, updateDay } from "../actions";
 
 export function DayCard({
   periodId,
@@ -32,7 +33,6 @@ export function DayCard({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [note, setNote] = React.useState(day.note ?? "");
-  const [newMeal, setNewMeal] = React.useState("");
 
   function run(fn: () => Promise<void>) {
     startTransition(async () => {
@@ -49,13 +49,6 @@ export function DayCard({
   function saveNote() {
     if ((note ?? "") === (day.note ?? "")) return;
     run(() => updateDay(periodId, day.id, { note }));
-  }
-
-  function addNewMeal() {
-    const t = newMeal.trim();
-    if (!t) return;
-    setNewMeal("");
-    run(() => addMeal(periodId, day.id, t));
   }
 
   return (
@@ -92,22 +85,8 @@ export function DayCard({
         ))}
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5">
-        <Input
-          value={newMeal}
-          onChange={(e) => setNewMeal(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addNewMeal();
-            }
-          }}
-          placeholder="+ Maaltijd toevoegen…"
-          className="h-9 border-dashed bg-transparent text-sm"
-        />
-        <Button variant="ghost" size="icon" onClick={addNewMeal} disabled={!newMeal.trim()} aria-label="Maaltijd toevoegen">
-          <Plus className="size-4" />
-        </Button>
+      <div className="mt-2">
+        <MealAutocomplete periodId={periodId} dayId={day.id} recipes={recipes} />
       </div>
     </div>
   );

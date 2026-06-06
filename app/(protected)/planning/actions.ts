@@ -167,7 +167,12 @@ export async function removeDay(periodId: string, dayId: string): Promise<void> 
 }
 
 // ------------------------------------------------------------------ meals ----
-export async function addMeal(periodId: string, planDayId: string, rawText: string): Promise<void> {
+export async function addMeal(
+  periodId: string,
+  planDayId: string,
+  rawText: string,
+  recipeId: string | null = null,
+): Promise<void> {
   const db = getDb();
   const parsed = parseMealLine(rawText);
   const { count } = await db
@@ -176,6 +181,7 @@ export async function addMeal(periodId: string, planDayId: string, rawText: stri
     .eq("plan_day_id", planDayId);
   const { error } = await db.from("plan_meals").insert({
     plan_day_id: planDayId,
+    recipe_id: recipeId,
     raw_text: rawText,
     freeform_title: parsed.title,
     cook: parsed.cook,
