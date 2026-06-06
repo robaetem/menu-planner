@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
+import { addDays, differenceInCalendarDays, format } from "date-fns";
 import { nl } from "date-fns/locale";
 import { toast } from "sonner";
 import { Plus, CalendarDays, ChevronRight, CalendarPlus, Archive } from "lucide-react";
@@ -111,33 +111,49 @@ function PeriodCard({ period, archived = false }: { period: PeriodRow; archived?
   );
 }
 
+const MAX_PERIOD_DAYS = 92;
+
 function NewPeriodDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const router = useRouter();
-  const [date, setDate] = React.useState<Date | undefined>(new Date());
-  const [days, setDays] = React.useState("6");
+  const [startDate, setStartDate] = React.useState<Date | undefined>(new Date());
+  const [endDate, setEndDate] = React.useState<Date | undefined>(addDays(new Date(), 5));
   const [title, setTitle] = React.useState("");
   const [pending, setPending] = React.useState(false);
-  const [calOpen, setCalOpen] = React.useState(false);
+  const [startOpen, setStartOpen] = React.useState(false);
+  const [endOpen, setEndOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
-      setDate(new Date());
-      setDays("6");
+      setStartDate(new Date());
+      setEndDate(addDays(new Date(), 5));
       setTitle("");
     }
   }, [open]);
 
-  const dayCount = Math.max(1, Math.min(31, parseInt(days || "1", 10) || 1));
+  const dayCount = startDate && endDate ? differenceInCalendarDays(endDate, startDate) + 1 : 0;
+  const tooLong = dayCount > MAX_PERIOD_DAYS;
+  const validRange = !!startDate && !!endDate && dayCount >= 1 && !tooLong;
+
+  function pickStart(d?: Date) {
+    setStartDate(d);
+    setStartOpen(false);
+    // Keep the end on/after the start.
+    if (d && endDate && endDate < d) setEndDate(d);
+  }
+  function pickEnd(d?: Date) {
+    setEndDate(d);
+    setEndOpen(false);
+  }
 
   async function onCreate() {
-    if (!date) {
-      toast.error("Kies een startdatum.");
+    if (!validRange || !startDate) {
+      toast.error("Kies een geldige start- en einddatum.");
       return;
     }
     setPending(true);
     try {
       const id = await createPeriod({
-        start_date: format(date, "yyyy-MM-dd"),
+        start_date: format(startDate, "yyyy-MM-dd"),
         title: title.trim() || null,
         days: dayCount,
       });
@@ -152,13 +168,20 @@ function NewPeriodDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     }
   }
 
+  const dateButton = (value: Date | undefined) => (
+    <Button variant="outline" className="w-full justify-start font-normal">
+      <CalendarDays className="size-4" />
+      {value ? format(value, "d MMM yyyy", { locale: nl }) : "Kies datum"}
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Nieuwe periode</DialogTitle>
           <DialogDescription>
-            Kies een startdag en hoeveel dagen je wil plannen. Periodes mogen op elke dag starten.
+            Kies de start- en einddatum van je planning. Periodes mogen op elke dag starten en eindigen.
           </DialogDescription>
         </DialogHeader>
 
@@ -166,39 +189,28 @@ function NewPeriodDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Startdatum</Label>
-              <Popover open={calOpen} onOpenChange={setCalOpen}>
-                <PopoverTrigger
-                  render={
-                    <Button variant="outline" className="w-full justify-start font-normal">
-                      <CalendarDays className="size-4" />
-                      {date ? format(date, "d MMM yyyy", { locale: nl }) : "Kies datum"}
-                    </Button>
-                  }
-                />
+              <Popover open={startOpen} onOpenChange={setStartOpen}>
+                <PopoverTrigger render={dateButton(startDate)} />
                 <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={date}
-                    onSelect={(d) => {
-                      setDate(d);
-                      setCalOpen(false);
-                    }}
-                    autoFocus
-                  />
+                  <Calendar mode="single" selected={startDate} onSelect={pickStart} autoFocus />
                 </PopoverContent>
               </Popover>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="np-days">Aantal dagen</Label>
-              <Input
-                id="np-days"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={31}
-                value={days}
-                onChange={(e) => setDays(e.target.value)}
-              />
+              <Label>Einddatum</Label>
+              <Popover open={endOpen} onOpenChange={setEndOpen}>
+                <PopoverTrigger render={dateButton(endDate)} />
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={endDate}
+                    onSelect={pickEnd}
+                    defaultMonth={endDate ?? startDate}
+                    disabled={startDate ? { before: startDate } : undefined}
+                    autoFocus
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -212,11 +224,20 @@ function NewPeriodDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
             />
           </div>
 
-          {date && (
+          {validRange ? (
             <p className="rounded-md bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
-              Plant <span className="font-medium text-foreground">{formatRange(format(date, "yyyy-MM-dd"), dayCount)}</span>
+              Plant{" "}
+              <span className="font-medium text-foreground">
+                {formatRange(format(startDate!, "yyyy-MM-dd"), dayCount)}
+              </span>
               {" · "}
               {dayCount} {dayCount === 1 ? "dag" : "dagen"}
+            </p>
+          ) : (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {tooLong
+                ? `Een periode kan maximaal ${MAX_PERIOD_DAYS} dagen lang zijn.`
+                : "De einddatum moet op of na de startdatum liggen."}
             </p>
           )}
         </div>
@@ -225,7 +246,7 @@ function NewPeriodDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             Annuleren
           </Button>
-          <Button onClick={onCreate} disabled={pending}>
+          <Button onClick={onCreate} disabled={pending || !validRange}>
             <CalendarPlus className="size-4" />
             {pending ? "Aanmaken…" : "Periode aanmaken"}
           </Button>

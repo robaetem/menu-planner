@@ -24,7 +24,7 @@ export async function createPeriod(input: {
     .select("id")
     .single();
   if (error) throw error;
-  const n = Math.max(1, Math.min(31, input.days || 1));
+  const n = Math.max(1, Math.min(92, input.days || 1));
   const rows = Array.from({ length: n }, (_, i) => ({
     period_id: period.id,
     day_date: addIsoDays(input.start_date, i),
