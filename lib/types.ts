@@ -7,6 +7,7 @@ export type Household = {
   name: string;
   diners: Diner[];
   default_people: number;
+  plan_horizon: string | null;
   created_at: string;
 };
 
@@ -44,25 +45,21 @@ export type Recipe = {
 
 export type RecipeWithIngredients = Recipe & { ingredients: Ingredient[] };
 
-export type Period = {
-  id: string;
-  title: string | null;
-  start_date: string; // ISO date (yyyy-mm-dd)
-  is_archived: boolean;
-  created_at: string;
-};
+/** Who a meal is for: Samen (both, full-width) or a single person (half-width). */
+export type Assignee = "both" | "amber" | "robin";
 
 export type PlanMeal = {
   id: string;
   plan_day_id: string;
   recipe_id: string | null;
+  assignee: Assignee;
   raw_text: string;
   freeform_title: string | null;
   cook: string | null;
   diner_count: number;
   diner_keys: string[];
   freezer_servings: number;
-  from_freezer: boolean;
+  from_freezer: boolean; // true = "Potje diepvries" (blue, eat from stock)
   note: string | null;
   sort: number;
 };
@@ -71,26 +68,17 @@ export type PlanMealWithRecipe = PlanMeal & { recipe: Recipe | null };
 
 export type PlanDay = {
   id: string;
-  period_id: string;
-  day_date: string; // ISO date
+  day_date: string; // ISO date (yyyy-mm-dd)
   note: string | null;
+  amber_mode: string | null;
+  robin_mode: string | null;
   sort: number;
 };
 
 export type PlanDayWithMeals = PlanDay & { meals: PlanMealWithRecipe[] };
 
-export type PeriodWithDays = Period & { days: PlanDayWithMeals[] };
-
-export type ShoppingExtra = {
-  id: string;
-  period_id: string;
-  text: string;
-  checked: boolean;
-  sort: number;
-};
-
-export type ShoppingCheck = {
-  period_id: string;
-  line_key: string;
-  checked: boolean;
+/** A day in the rendered range — may not have a persisted row yet (empty day). */
+export type PlanningDay = {
+  day_date: string;
+  row: PlanDayWithMeals | null;
 };

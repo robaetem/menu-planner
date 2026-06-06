@@ -1,24 +1,20 @@
 import { getDb } from "@/lib/supabase/server";
-import type {
-  Household,
-  Ingredient,
-  Period,
-  PeriodWithDays,
-  RecipeWithIngredients,
-  ShoppingCheck,
-  ShoppingExtra,
-} from "@/lib/types";
+import { addIsoDays, todayIso } from "@/lib/date";
+import type { Household, PlanDayWithMeals, PlanningDay, RecipeWithIngredients } from "@/lib/types";
 
 const DEFAULT_DINERS = [
   { key: "robin", label: "Robin" },
   { key: "amber", label: "Amber" },
 ];
 
+const HORIZON_MIN_DAYS = 10; // always show at least today..today+10
+const HORIZON_MAX_DAYS = 180; // safety cap
+
 export async function getHousehold(): Promise<Household> {
   const db = getDb();
   const { data } = await db.from("household").select("*").limit(1).single();
   if (!data) {
-    return { id: "", name: "Robin & Amber", diners: DEFAULT_DINERS, default_people: 2, created_at: "" };
+    return { id: "", name: "Robin & Amber", diners: DEFAULT_DINERS, default_people: 2, plan_horizon: null, created_at: "" };
   }
   return {
     ...data,
@@ -47,99 +43,40 @@ export async function getRecipe(id: string): Promise<RecipeWithIngredients | nul
   return data ? sortIngredients(data as RecipeWithIngredients) : null;
 }
 
-export async function listPeriods(): Promise<Period[]> {
+/**
+ * The single rolling plan: every date from today to the end of the horizon
+ * (at least today+10, longer if the household extended it or has later rows).
+ * Empty dates get a `row: null` placeholder so they still render.
+ */
+export async function getPlanningDays(): Promise<{ days: PlanningDay[]; end: string }> {
   const db = getDb();
-  const { data, error } = await db.from("periods").select("*").order("start_date", { ascending: false });
-  if (error) throw error;
-  return (data || []) as Period[];
-}
+  const today = todayIso();
 
-/** Periods with their day count + linked-meal count, for the list cards. */
-export async function listPeriodsWithCounts(): Promise<(Period & { dayCount: number; mealCount: number })[]> {
-  const db = getDb();
   const { data, error } = await db
-    .from("periods")
-    .select("*, plan_days(id, plan_meals(id))")
-    .order("start_date", { ascending: false });
+    .from("plan_days")
+    .select("*, plan_meals(*, recipe:recipes(*))")
+    .gte("day_date", today)
+    .order("day_date", { ascending: true });
   if (error) throw error;
-  return (data || []).map((p: any) => {
-    const days = p.plan_days || [];
-    const mealCount = days.reduce((n: number, d: any) => n + (d.plan_meals?.length || 0), 0);
-    const { plan_days, ...rest } = p;
-    return { ...(rest as Period), dayCount: days.length, mealCount };
+
+  const rows: PlanDayWithMeals[] = (data || []).map((d: any) => {
+    const { plan_meals, ...rest } = d;
+    return { ...rest, meals: [...(plan_meals || [])].sort((a: any, b: any) => a.sort - b.sort) };
   });
-}
 
-export async function getPeriodWithDays(id: string): Promise<PeriodWithDays | null> {
-  const db = getDb();
-  const { data, error } = await db
-    .from("periods")
-    .select("*, plan_days(*, plan_meals(*, recipe:recipes(*)))")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const days = ((data as any).plan_days || [])
-    .map((d: any) => ({
-      ...d,
-      meals: [...(d.plan_meals || [])].sort((a: any, b: any) => a.sort - b.sort),
-    }))
-    .sort(
-      (a: any, b: any) =>
-        a.day_date.localeCompare(b.day_date) || a.sort - b.sort,
-    );
-  const { plan_days, ...rest } = data as any;
-  return { ...(rest as Period), days } as PeriodWithDays;
-}
+  const hh = await getHousehold();
+  const minEnd = addIsoDays(today, HORIZON_MIN_DAYS);
+  const latestRow = rows.length ? rows[rows.length - 1].day_date : today;
+  const candidates = [minEnd, latestRow];
+  if (hh.plan_horizon) candidates.push(hh.plan_horizon);
+  const cap = addIsoDays(today, HORIZON_MAX_DAYS);
+  let end = candidates.sort()[candidates.length - 1];
+  if (end > cap) end = cap;
 
-export async function listExtras(periodId: string): Promise<ShoppingExtra[]> {
-  const db = getDb();
-  const { data } = await db
-    .from("shopping_extras")
-    .select("*")
-    .eq("period_id", periodId)
-    .order("sort", { ascending: true });
-  return (data || []) as ShoppingExtra[];
-}
-
-export async function listChecks(periodId: string): Promise<ShoppingCheck[]> {
-  const db = getDb();
-  const { data } = await db.from("shopping_checks").select("*").eq("period_id", periodId);
-  return (data || []) as ShoppingCheck[];
-}
-
-/** Everything needed to compute + render the shopping list for a period. */
-export async function getShoppingData(periodId: string): Promise<{
-  period: PeriodWithDays | null;
-  ingredientsByRecipe: Record<string, Ingredient[]>;
-  extras: ShoppingExtra[];
-  checks: ShoppingCheck[];
-}> {
-  const period = await getPeriodWithDays(periodId);
-  const db = getDb();
-
-  const recipeIds = new Set<string>();
-  period?.days.forEach((d) => d.meals.forEach((m) => m.recipe_id && recipeIds.add(m.recipe_id)));
-
-  const ingredientsByRecipe: Record<string, Ingredient[]> = {};
-  if (recipeIds.size) {
-    const { data: ings } = await db.from("ingredients").select("*").in("recipe_id", [...recipeIds]);
-    (ings || []).forEach((ig: any) => {
-      (ingredientsByRecipe[ig.recipe_id] ||= []).push(ig as Ingredient);
-    });
+  const byDate = new Map(rows.map((r) => [r.day_date, r]));
+  const days: PlanningDay[] = [];
+  for (let d = today; d <= end; d = addIsoDays(d, 1)) {
+    days.push({ day_date: d, row: byDate.get(d) ?? null });
   }
-
-  const { data: extras } = await db
-    .from("shopping_extras")
-    .select("*")
-    .eq("period_id", periodId)
-    .order("sort", { ascending: true });
-  const { data: checks } = await db.from("shopping_checks").select("*").eq("period_id", periodId);
-
-  return {
-    period,
-    ingredientsByRecipe,
-    extras: (extras || []) as ShoppingExtra[],
-    checks: (checks || []) as ShoppingCheck[],
-  };
+  return { days, end };
 }

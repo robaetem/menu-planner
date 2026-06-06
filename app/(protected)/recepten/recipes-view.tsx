@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Plus, BookOpen, X } from "lucide-react";
+import { Search, Plus, BookOpen, X, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,11 +18,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { rankRecipes } from "@/lib/recipes/ranker";
-import type { RecipeWithIngredients } from "@/lib/types";
+import { formatDayLabel } from "@/lib/date";
+import type { Assignee, RecipeWithIngredients } from "@/lib/types";
 import { RecipeCard } from "./recipe-card";
 import { RecipeEditorDialog } from "./recipe-editor-dialog";
 import { RecipeDetailDialog } from "./recipe-detail-dialog";
 import { deleteRecipe } from "./actions";
+import { assignRecipe } from "../planning/actions";
+import { assigneeLabel } from "../planning/config";
+
+export type AssignTarget = { date: string; who: Assignee };
 
 const CHIPS = [
   { label: "Snel", token: "snel" },
@@ -32,7 +37,13 @@ const CHIPS = [
   { label: "Vega", token: "vegetarisch" },
 ];
 
-export function RecipesView({ recipes }: { recipes: RecipeWithIngredients[] }) {
+export function RecipesView({
+  recipes,
+  assign = null,
+}: {
+  recipes: RecipeWithIngredients[];
+  assign?: AssignTarget | null;
+}) {
   const router = useRouter();
   const [query, setQuery] = React.useState("");
   const [chips, setChips] = React.useState<Set<string>>(new Set());
@@ -41,6 +52,26 @@ export function RecipesView({ recipes }: { recipes: RecipeWithIngredients[] }) {
   const [viewing, setViewing] = React.useState<RecipeWithIngredients | null>(null);
   const [deleting, setDeleting] = React.useState<RecipeWithIngredients | null>(null);
   const [deletePending, setDeletePending] = React.useState(false);
+  const [assigning, setAssigning] = React.useState(false);
+
+  async function assignToDay(r: RecipeWithIngredients) {
+    if (!assign || assigning) return;
+    setAssigning(true);
+    try {
+      await assignRecipe(assign.date, assign.who, r.id);
+      toast.success(`“${r.title}” toegevoegd`);
+      router.push("/planning");
+    } catch (e) {
+      toast.error("Toevoegen mislukt.");
+      console.error(e);
+      setAssigning(false);
+    }
+  }
+
+  function onCardOpen(r: RecipeWithIngredients) {
+    if (assign) assignToDay(r);
+    else setViewing(r);
+  }
 
   const effectiveQuery = React.useMemo(
     () => [query, ...chips].filter(Boolean).join(" "),
@@ -86,6 +117,21 @@ export function RecipesView({ recipes }: { recipes: RecipeWithIngredients[] }) {
 
   return (
     <div>
+      {/* Assign-mode banner ("Gerecht" flow from Planning) */}
+      {assign && (
+        <div className="sticky top-14 z-20 -mx-4 mb-5 flex items-center gap-3 border-b bg-accent/95 px-4 py-3 backdrop-blur md:-mx-7 md:px-7">
+          <Button variant="outline" size="sm" onClick={() => router.push("/planning")} className="shrink-0 bg-background">
+            <ArrowLeft className="size-4" /> Terug
+          </Button>
+          <p className="min-w-0 text-sm leading-tight">
+            <span className="font-semibold">Kies een gerecht</span> voor{" "}
+            <span className="font-semibold text-primary">{assigneeLabel(assign.who)}</span> op{" "}
+            <span className="font-semibold">{formatDayLabel(assign.date)}</span>
+            <span className="block text-xs text-muted-foreground">Klik een recept om het toe te voegen aan de planning.</span>
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -94,9 +140,11 @@ export function RecipesView({ recipes }: { recipes: RecipeWithIngredients[] }) {
             {recipes.length} {recipes.length === 1 ? "recept" : "recepten"} in jullie databank
           </p>
         </div>
-        <Button onClick={() => setEditing("new")} className="shrink-0">
-          <Plus className="size-4" /> Nieuw recept
-        </Button>
+        {!assign && (
+          <Button onClick={() => setEditing("new")} className="shrink-0">
+            <Plus className="size-4" /> Nieuw recept
+          </Button>
+        )}
       </div>
 
       {/* Search + chips */}
@@ -173,7 +221,7 @@ export function RecipesView({ recipes }: { recipes: RecipeWithIngredients[] }) {
             <RecipeCard
               key={r.id}
               recipe={r}
-              onView={() => setViewing(r)}
+              onView={() => onCardOpen(r)}
               onEdit={() => setEditing(r)}
               onDelete={() => setDeleting(r)}
             />
