@@ -81,10 +81,15 @@ export async function addPotjeFromInventory(
     sort: await nextSort(db, dayId),
   });
   if (error) throw error;
-  const patch: Record<string, number> = {};
-  if (n.robin) patch.robin_count = potje.robin_count - 1;
-  if (n.amber) patch.amber_count = potje.amber_count - 1;
-  await db.from("potjes").update(patch).eq("id", potjeId);
+  const newRobin = potje.robin_count - (n.robin ? 1 : 0);
+  const newAmber = potje.amber_count - (n.amber ? 1 : 0);
+  if (newRobin <= 0 && newAmber <= 0) {
+    // No instances left — drop it from the potjes list. The plan_meal keeps the
+    // name (freeform_title) + assignee so deassigning can restore it by name.
+    await db.from("potjes").delete().eq("id", potjeId);
+  } else {
+    await db.from("potjes").update({ robin_count: newRobin, amber_count: newAmber }).eq("id", potjeId);
+  }
   revalidatePath("/planning");
   revalidatePath("/potjes");
 }
@@ -115,21 +120,37 @@ export async function deleteMeal(mealId: string): Promise<void> {
   const db = getDb();
   const { data: meal } = await db
     .from("plan_meals")
-    .select("potje_id, assignee")
+    .select("from_freezer, assignee, freeform_title, raw_text")
     .eq("id", mealId)
     .maybeSingle();
   const { error } = await db.from("plan_meals").delete().eq("id", mealId);
   if (error) throw error;
 
-  // Return the potje to the freezer inventory if this was a potje meal.
-  if (meal?.potje_id) {
-    const { data: potje } = await db.from("potjes").select("*").eq("id", meal.potje_id).maybeSingle();
-    if (potje) {
+  // Deassigning a "Potje diepvries" returns it to the inventory — restored by
+  // name so it works whether the potje still exists (partly consumed) or was
+  // removed when it hit zero (recreated). Names are the potje's identity.
+  if (meal?.from_freezer) {
+    const name = (meal.freeform_title || meal.raw_text || "").trim();
+    if (name) {
       const n = needs(meal.assignee as Assignee);
-      const patch: Record<string, number> = {};
-      if (n.robin) patch.robin_count = potje.robin_count + 1;
-      if (n.amber) patch.amber_count = potje.amber_count + 1;
-      await db.from("potjes").update(patch).eq("id", meal.potje_id);
+      const { data: existing } = await db.from("potjes").select("*").ilike("name", name).maybeSingle();
+      if (existing) {
+        await db
+          .from("potjes")
+          .update({
+            robin_count: existing.robin_count + (n.robin ? 1 : 0),
+            amber_count: existing.amber_count + (n.amber ? 1 : 0),
+          })
+          .eq("id", existing.id);
+      } else {
+        const { count } = await db.from("potjes").select("id", { count: "exact", head: true });
+        await db.from("potjes").insert({
+          name,
+          robin_count: n.robin ? 1 : 0,
+          amber_count: n.amber ? 1 : 0,
+          sort: count || 0,
+        });
+      }
     }
   }
   revalidatePath("/planning");

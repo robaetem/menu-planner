@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
-import type { Household, PlanDayWithMeals, PlanningDay, Potje, RecipeWithIngredients } from "@/lib/types";
+import type { Household, PlanDayWithMeals, PlanningDay, Potje, RecipeTag, RecipeWithIngredients } from "@/lib/types";
 
 const DEFAULT_DINERS = [
   { key: "robin", label: "Robin" },
@@ -44,6 +44,25 @@ export async function listPotjes(): Promise<Potje[]> {
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []) as Potje[];
+}
+
+export async function listTags(): Promise<RecipeTag[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("recipe_tags")
+    .select("*")
+    .order("sort", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as RecipeTag[];
+}
+
+/** Every potje name ever entered — powers the add-potje autocomplete. */
+export async function listPotjeNames(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from("potje_names").select("name").order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: { name: string }) => r.name);
 }
 
 export async function getRecipe(id: string): Promise<RecipeWithIngredients | null> {

@@ -15,9 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Plus, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { RECIPE_TAGS } from "@/lib/recipes/tags";
-import type { RecipeWithIngredients } from "@/lib/types";
+import type { RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import {
   IngredientListEditor,
   emptyRow,
@@ -26,18 +26,23 @@ import {
   type IngRow,
 } from "./ingredient-list-editor";
 import { createRecipe, updateRecipe, type RecipeInput } from "./actions";
+import { createTag } from "./tag-actions";
 
 export function RecipeEditorDialog({
   open,
   onOpenChange,
   recipe,
+  allTags,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   recipe: RecipeWithIngredients | null;
+  allTags: RecipeTag[];
 }) {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
+  const [newTag, setNewTag] = React.useState("");
+  const [addingTag, setAddingTag] = React.useState(false);
 
   const [title, setTitle] = React.useState("");
   const [tags, setTags] = React.useState<string[]>([]);
@@ -52,10 +57,32 @@ export function RecipeEditorDialog({
     setIngRows(recipe ? rowsFromIngredients(recipe.ingredients) : [emptyRow()]);
     setMethod(recipe?.method ?? "");
     setNotes(recipe?.notes ?? "");
+    setNewTag("");
   }, [open, recipe]);
 
   function toggleTag(value: string) {
     setTags((prev) => (prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]));
+  }
+
+  async function addInlineTag() {
+    const label = newTag.trim();
+    if (!label || addingTag) return;
+    const value = label.toLowerCase();
+    setNewTag("");
+    // Toggle it on immediately; create it server-side if it's new.
+    setTags((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    if (!allTags.some((t) => t.value === value)) {
+      setAddingTag(true);
+      try {
+        await createTag(label);
+        router.refresh();
+      } catch (e) {
+        toast.error("Tag toevoegen mislukt.");
+        console.error(e);
+      } finally {
+        setAddingTag(false);
+      }
+    }
   }
 
   async function onSave() {
@@ -114,11 +141,11 @@ export function RecipeEditorDialog({
           <div className="space-y-2">
             <Label>Tags</Label>
             <div className="flex flex-wrap gap-2">
-              {RECIPE_TAGS.map((t) => {
+              {allTags.map((t) => {
                 const active = tags.includes(t.value);
                 return (
                   <button
-                    key={t.value}
+                    key={t.id}
                     type="button"
                     onClick={() => toggleTag(t.value)}
                     className={cn(
@@ -132,6 +159,29 @@ export function RecipeEditorDialog({
                   </button>
                 );
               })}
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <Input
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addInlineTag();
+                  }
+                }}
+                placeholder="Nieuwe tag…"
+                className="h-9 max-w-48"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addInlineTag}
+                disabled={!newTag.trim() || addingTag}
+              >
+                {addingTag ? <Check className="size-4" /> : <Plus className="size-4" />} Tag
+              </Button>
             </div>
           </div>
 

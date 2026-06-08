@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Plus, BookOpen, X, ArrowLeft } from "lucide-react";
+import { Search, Plus, BookOpen, X, ArrowLeft, Tag as TagIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,11 +17,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { RECIPE_TAGS } from "@/lib/recipes/tags";
 import { formatDayLabel } from "@/lib/date";
-import type { Assignee, RecipeWithIngredients } from "@/lib/types";
+import type { Assignee, RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import { RecipeCard } from "./recipe-card";
 import { RecipeEditorDialog } from "./recipe-editor-dialog";
+import { TagManagerDialog } from "./tag-manager-dialog";
 import { deleteRecipe } from "./actions";
 import { assignRecipe } from "../planning/actions";
 import { assigneeLabel } from "../planning/config";
@@ -40,9 +40,11 @@ function matchesSearch(r: RecipeWithIngredients, query: string): boolean {
 
 export function RecipesView({
   recipes,
+  tags,
   assign = null,
 }: {
   recipes: RecipeWithIngredients[];
+  tags: RecipeTag[];
   assign?: AssignTarget | null;
 }) {
   const router = useRouter();
@@ -53,6 +55,7 @@ export function RecipesView({
   const [deleting, setDeleting] = React.useState<RecipeWithIngredients | null>(null);
   const [deletePending, setDeletePending] = React.useState(false);
   const [assigning, setAssigning] = React.useState(false);
+  const [managingTags, setManagingTags] = React.useState(false);
 
   async function assignToDay(r: RecipeWithIngredients) {
     if (!assign || assigning) return;
@@ -138,9 +141,14 @@ export function RecipesView({
           </p>
         </div>
         {!assign && (
-          <Button onClick={() => setEditing("new")} className="shrink-0">
-            <Plus className="size-4" /> Nieuw recept
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={() => setManagingTags(true)}>
+              <TagIcon className="size-4" /> Tags
+            </Button>
+            <Button onClick={() => setEditing("new")}>
+              <Plus className="size-4" /> Nieuw recept
+            </Button>
+          </div>
         )}
       </div>
 
@@ -165,7 +173,7 @@ export function RecipesView({
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {RECIPE_TAGS.map((c) => {
+          {tags.map((c) => {
             const active = chips.has(c.value);
             return (
               <button
@@ -231,7 +239,9 @@ export function RecipesView({
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         recipe={editing === "new" ? null : editing}
+        allTags={tags}
       />
+      <TagManagerDialog open={managingTags} onOpenChange={setManagingTags} tags={tags} />
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

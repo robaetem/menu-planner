@@ -51,6 +51,15 @@ export type IngredientRow = Omit<Ingredient, "id" | "recipe_id">;
 /** Who a meal is for: Samen (both, full-width) or a single person (half-width). */
 export type Assignee = "both" | "amber" | "robin";
 
+/** A user-managed recipe tag. `value` is the stable key stored in recipes.tags[]. */
+export type RecipeTag = {
+  id: string;
+  value: string;
+  label: string;
+  sort: number;
+  created_at: string;
+};
+
 export type Potje = {
   id: string;
   name: string;

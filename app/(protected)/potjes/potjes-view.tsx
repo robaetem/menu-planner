@@ -31,7 +31,15 @@ import { cn } from "@/lib/utils";
 import type { Diner, Potje } from "@/lib/types";
 import { createPotje, deletePotje, setPotjeCount } from "./actions";
 
-export function PotjesView({ potjes, diners }: { potjes: Potje[]; diners: Diner[] }) {
+export function PotjesView({
+  potjes,
+  diners,
+  potjeNames,
+}: {
+  potjes: Potje[];
+  diners: Diner[];
+  potjeNames: string[];
+}) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState<Potje | null>(null);
   const router = useRouter();
@@ -112,6 +120,7 @@ export function PotjesView({ potjes, diners }: { potjes: Potje[]; diners: Diner[
         onOpenChange={setDialogOpen}
         robinLabel={robinLabel}
         amberLabel={amberLabel}
+        potjeNames={potjeNames}
       />
 
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
@@ -184,25 +193,53 @@ function NewPotjeDialog({
   onOpenChange,
   robinLabel,
   amberLabel,
+  potjeNames,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   robinLabel: string;
   amberLabel: string;
+  potjeNames: string[];
 }) {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [robin, setRobin] = React.useState("1");
   const [amber, setAmber] = React.useState("1");
   const [pending, setPending] = React.useState(false);
+  const [showSuggest, setShowSuggest] = React.useState(false);
+  const [activeIdx, setActiveIdx] = React.useState(-1);
 
   React.useEffect(() => {
     if (open) {
       setName("");
       setRobin("1");
       setAmber("1");
+      setShowSuggest(false);
+      setActiveIdx(-1);
     }
   }, [open]);
+
+  // Prefix matches first, then any other substring match — capped, and never
+  // suggesting the exact text already typed.
+  const suggestions = React.useMemo(() => {
+    const q = name.trim().toLowerCase();
+    if (!q) return [];
+    const starts: string[] = [];
+    const contains: string[] = [];
+    for (const n of potjeNames) {
+      const l = n.toLowerCase();
+      if (l === q) continue;
+      if (l.startsWith(q)) starts.push(n);
+      else if (l.includes(q)) contains.push(n);
+    }
+    return [...starts, ...contains].slice(0, 8);
+  }, [name, potjeNames]);
+
+  function choose(value: string) {
+    setName(value);
+    setShowSuggest(false);
+    setActiveIdx(-1);
+  }
 
   async function onCreate() {
     if (!name.trim()) {
@@ -233,14 +270,67 @@ function NewPotjeDialog({
         <div className="space-y-4 py-1">
           <div className="space-y-2">
             <Label htmlFor="np-name">Naam</Label>
-            <Input
-              id="np-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="bv. Gehaktballetjes in tomatensaus"
-              autoFocus
-              onKeyDown={(e) => e.key === "Enter" && onCreate()}
-            />
+            <div className="relative">
+              <Input
+                id="np-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setShowSuggest(true);
+                  setActiveIdx(-1);
+                }}
+                onFocus={() => setShowSuggest(true)}
+                onBlur={() => setTimeout(() => setShowSuggest(false), 120)}
+                placeholder="bv. Gehaktballetjes in tomatensaus"
+                autoComplete="off"
+                autoFocus
+                role="combobox"
+                aria-expanded={showSuggest && suggestions.length > 0}
+                aria-autocomplete="list"
+                onKeyDown={(e) => {
+                  const open = showSuggest && suggestions.length > 0;
+                  if (e.key === "ArrowDown" && open) {
+                    e.preventDefault();
+                    setActiveIdx((i) => (i + 1) % suggestions.length);
+                  } else if (e.key === "ArrowUp" && open) {
+                    e.preventDefault();
+                    setActiveIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+                  } else if (e.key === "Enter") {
+                    if (open && activeIdx >= 0) {
+                      e.preventDefault();
+                      choose(suggestions[activeIdx]);
+                    } else {
+                      onCreate();
+                    }
+                  } else if (e.key === "Escape" && open) {
+                    e.preventDefault();
+                    setShowSuggest(false);
+                  }
+                }}
+              />
+              {showSuggest && suggestions.length > 0 && (
+                <ul className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md">
+                  {suggestions.map((s, i) => (
+                    <li key={s}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          choose(s);
+                        }}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        className={cn(
+                          "w-full truncate rounded-md px-2.5 py-1.5 text-left text-sm",
+                          i === activeIdx ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+                        )}
+                      >
+                        {s}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">

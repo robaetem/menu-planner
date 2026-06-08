@@ -7,6 +7,17 @@ function clampCount(n: number): number {
   return Math.max(0, Math.min(99, Math.floor(n) || 0));
 }
 
+/** Remember a potje name for the add-potje autocomplete (case-insensitively
+ *  deduped). The history only ever grows — it survives the potje itself. */
+export async function recordPotjeName(name: string): Promise<void> {
+  const t = name.trim();
+  if (!t) return;
+  const db = getDb();
+  const { data: existing } = await db.from("potje_names").select("id").ilike("name", t).maybeSingle();
+  if (existing) return;
+  await db.from("potje_names").insert({ name: t });
+}
+
 export async function createPotje(name: string, robin: number, amber: number): Promise<void> {
   const db = getDb();
   const t = name.trim();
@@ -19,6 +30,7 @@ export async function createPotje(name: string, robin: number, amber: number): P
     sort: count || 0,
   });
   if (error) throw error;
+  await recordPotjeName(t);
   revalidatePath("/potjes");
   revalidatePath("/planning");
 }
