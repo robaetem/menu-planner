@@ -4,8 +4,10 @@ import type { Ingredient, PlanDayWithMeals } from "@/lib/types";
 //
 //   servings_factor(meal) = diner_count + freezer_servings   (potjes = cook extra)
 //   per_serving -> amount(or amount_max) * servings_factor
-//   per_person  -> sum of amounts_per_person over the diners actually present
-//                  (potjes ignored — you don't freeze portioned meat)
+//   per_person  -> sum of amounts_per_person over the diners present, scaled by
+//                  servings_factor / diner_count. A potje is an extra round of the
+//                  diners present, so "+2 potjes" with 2 diners = one extra Robin +
+//                  one extra Amber portion.
 //   fixed       -> amount(or amount_max) once per meal
 //   from_freezer / unlinked meals contribute nothing.
 // Lines merge by (lower(name), lower(unit)); amount_max ("800-1000 g") is used so
@@ -92,7 +94,10 @@ export function computeShoppingList(
       }
       const ings = ingredientsByRecipe[meal.recipe_id] || [];
       mealsCounted++;
-      const factor = (meal.diner_count || 0) + (meal.freezer_servings || 0);
+      const dinerCount = meal.diner_count || meal.diner_keys?.length || 0;
+      const factor = dinerCount + (meal.freezer_servings || 0);
+      // Potjes add extra rounds of the diners present: 2 diners + 2 potjes = 2 rounds.
+      const potjeRounds = dinerCount > 0 ? factor / dinerCount : 1;
       for (const ig of ings) {
         const a = ig.amount_max ?? ig.amount;
         if (ig.scaling === "per_serving") {
@@ -107,7 +112,7 @@ export function computeShoppingList(
               any = true;
             }
           }
-          add(ig.name, ig.unit, any ? sum : null, ig.is_fresh, label);
+          add(ig.name, ig.unit, any ? sum * potjeRounds : null, ig.is_fresh, label);
         } else {
           add(ig.name, ig.unit, a, ig.is_fresh, label);
         }
