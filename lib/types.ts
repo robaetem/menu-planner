@@ -60,6 +60,17 @@ export type RecipeTag = {
   created_at: string;
 };
 
+/** A user-managed day "mode" / situation for one person (amber or robin).
+ *  `value` is the stable key stored in plan_days.amber_mode / robin_mode. */
+export type PlanMode = {
+  id: string;
+  who: "amber" | "robin";
+  value: string;
+  label: string;
+  sort: number;
+  created_at: string;
+};
+
 export type Potje = {
   id: string;
   name: string;

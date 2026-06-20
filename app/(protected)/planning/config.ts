@@ -1,7 +1,8 @@
 import type { Assignee } from "@/lib/types";
 
-export const AMBER_MODES = ["24 uur", "Recup", "Vrije middag", "A"];
-export const ROBIN_MODES = ["Brussel", "Leuven", "Thuiswerk"];
+// The Amber/Robin day "modes" are now user-managed (the `plan_modes` table,
+// edited via the mode-manager dialog). DEFAULT_MODE is the label shown when no
+// mode is set ("Thuis").
 export const DEFAULT_MODE = "thuis";
 
 export function assigneeLabel(a: Assignee): string {

@@ -26,11 +26,14 @@ export function ModePill({
   who: "amber" | "robin";
   label: string;
   value: string | null;
-  options: string[];
+  options: { value: string; label: string }[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const active = !!value;
+  // Show the option's label for the stored value; fall back to the raw value
+  // (e.g. a mode deleted after it was set) so the pill never goes blank.
+  const display = value ? options.find((o) => o.value === value)?.label ?? value : DEFAULT_MODE;
 
   function pick(mode: string | null) {
     start(async () => {
@@ -60,7 +63,7 @@ export function ModePill({
         }
       >
         <span>
-          {label}: {value ?? DEFAULT_MODE}
+          {label}: {display}
         </span>
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
@@ -68,8 +71,8 @@ export function ModePill({
         <DropdownMenuItem onClick={() => pick(null)}>Thuis</DropdownMenuItem>
         <DropdownMenuSeparator />
         {options.map((o) => (
-          <DropdownMenuItem key={o} onClick={() => pick(o)}>
-            {o}
+          <DropdownMenuItem key={o.value} onClick={() => pick(o.value)}>
+            {o.label}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

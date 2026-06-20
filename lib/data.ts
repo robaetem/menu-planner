@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
-import type { Household, PlanDayWithMeals, PlanningDay, Potje, RecipeTag, RecipeWithIngredients } from "@/lib/types";
+import type { Household, PlanDayWithMeals, PlanMode, PlanningDay, Potje, RecipeTag, RecipeWithIngredients } from "@/lib/types";
 
 const DEFAULT_DINERS = [
   { key: "robin", label: "Robin" },
@@ -55,6 +55,19 @@ export async function listTags(): Promise<RecipeTag[]> {
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []) as RecipeTag[];
+}
+
+/** User-managed day modes (the Amber/Robin situation pills), ordered per person. */
+export async function listModes(): Promise<PlanMode[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("plan_modes")
+    .select("*")
+    .order("who", { ascending: true })
+    .order("sort", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as PlanMode[];
 }
 
 /** Every potje name ever entered — powers the add-potje autocomplete. */

@@ -6,12 +6,15 @@ import type { Diner, PlanMealWithRecipe, PlanningDay, Potje } from "@/lib/types"
 import { ModePill } from "./mode-pill";
 import { MealCard } from "./meal-card";
 import { AddMealButton } from "./add-meal-buttons";
-import { AMBER_MODES, ROBIN_MODES } from "./config";
+
+type ModeOption = { value: string; label: string };
 
 export function DayCard({
   planningDay,
   diners,
   potjes,
+  amberModes,
+  robinModes,
   selected,
   onToggleSelect,
   onViewMeal,
@@ -19,6 +22,8 @@ export function DayCard({
   planningDay: PlanningDay;
   diners: Diner[];
   potjes: Potje[];
+  amberModes: ModeOption[];
+  robinModes: ModeOption[];
   selected: boolean;
   onToggleSelect: () => void;
   onViewMeal: (meal: PlanMealWithRecipe) => void;
@@ -39,8 +44,8 @@ export function DayCard({
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
           <h3 className="text-base font-semibold tracking-tight md:text-lg">{formatDayLabel(day_date)}</h3>
           <div className="flex flex-wrap items-center gap-1.5">
-            <ModePill dayDate={day_date} who="amber" label={amberLabel} value={row?.amber_mode ?? null} options={AMBER_MODES} />
-            <ModePill dayDate={day_date} who="robin" label={robinLabel} value={row?.robin_mode ?? null} options={ROBIN_MODES} />
+            <ModePill dayDate={day_date} who="amber" label={amberLabel} value={row?.amber_mode ?? null} options={amberModes} />
+            <ModePill dayDate={day_date} who="robin" label={robinLabel} value={row?.robin_mode ?? null} options={robinModes} />
           </div>
         </div>
         <Checkbox
