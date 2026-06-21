@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
-import type { Assignee } from "@/lib/types";
+import type { Assignee, TemplateVleesje } from "@/lib/types";
 
 function dinersFor(assignee: Assignee): { diner_keys: string[]; diner_count: number } {
   if (assignee === "amber") return { diner_keys: ["amber"], diner_count: 1 };
@@ -42,6 +42,19 @@ export async function setMode(
   const dayId = await ensureDay(db, dayDate);
   const patch = who === "amber" ? { amber_mode: mode } : { robin_mode: mode };
   const { error } = await db.from("plan_days").update(patch).eq("id", dayId);
+  if (error) throw error;
+  revalidatePath("/planning");
+}
+
+/** Free-text note for one day (e.g. "Gebruik worsten uit de diepvries"). */
+export async function setDayNote(dayDate: string, note: string): Promise<void> {
+  const db = getDb();
+  const dayId = await ensureDay(db, dayDate);
+  const trimmed = note.trim();
+  const { error } = await db
+    .from("plan_days")
+    .update({ note: trimmed || null })
+    .eq("id", dayId);
   if (error) throw error;
   revalidatePath("/planning");
 }
@@ -120,11 +133,18 @@ export async function deleteMeal(mealId: string): Promise<void> {
   const db = getDb();
   const { data: meal } = await db
     .from("plan_meals")
-    .select("from_freezer, assignee, freeform_title, raw_text")
+    .select("from_freezer, assignee, freeform_title, raw_text, template_vleesjes")
     .eq("id", mealId)
     .maybeSingle();
   const { error } = await db.from("plan_meals").delete().eq("id", mealId);
   if (error) throw error;
+
+  // Return any freezer vleesjes this meal had reserved back to the inventory.
+  if (meal?.template_vleesjes) {
+    for (const { name, count } of freezerTotals(meal.template_vleesjes as TemplateVleesje[]).values()) {
+      await restoreVleesje(db, name, count);
+    }
+  }
 
   // Deassigning a "Potje diepvries" returns it to the inventory — restored by
   // name so it works whether the potje still exists (partly consumed) or was
@@ -155,6 +175,70 @@ export async function deleteMeal(mealId: string): Promise<void> {
   }
   revalidatePath("/planning");
   revalidatePath("/potjes");
+  revalidatePath("/vleesjes");
+}
+
+// ----------------------------------------------------------- template vleesjes ---
+function freezerTotals(vleesjes: TemplateVleesje[]): Map<string, { name: string; count: number }> {
+  const m = new Map<string, { name: string; count: number }>();
+  for (const v of vleesjes || []) {
+    if (v.source !== "freezer") continue;
+    const name = (v.name || "").trim();
+    const key = name.toLowerCase();
+    if (!key) continue;
+    const prev = m.get(key);
+    m.set(key, { name: prev?.name ?? name, count: (prev?.count ?? 0) + (Number(v.count) || 0) });
+  }
+  return m;
+}
+
+/** Put `count` of a vleesje back into the inventory by name (increment if it
+ *  still exists, else recreate — names are the vleesje's identity). */
+async function restoreVleesje(db: SupabaseClient, name: string, count: number): Promise<void> {
+  if (count <= 0) return;
+  const { data: existing } = await db.from("vleesjes").select("id, count").ilike("name", name).maybeSingle();
+  if (existing) {
+    await db.from("vleesjes").update({ count: existing.count + count }).eq("id", existing.id);
+  } else {
+    const { count: n } = await db.from("vleesjes").select("id", { count: "exact", head: true });
+    await db.from("vleesjes").insert({ name, count, sort: n || 0 });
+    const { data: known } = await db.from("vleesje_names").select("id").ilike("name", name).maybeSingle();
+    if (!known) await db.from("vleesje_names").insert({ name });
+  }
+}
+
+/** Take `count` of a vleesje out of the inventory by name (clamped at 0). */
+async function consumeVleesje(db: SupabaseClient, name: string, count: number): Promise<void> {
+  if (count <= 0) return;
+  const { data: existing } = await db.from("vleesjes").select("id, count").ilike("name", name).maybeSingle();
+  if (!existing) return;
+  await db.from("vleesjes").update({ count: Math.max(0, existing.count - count) }).eq("id", existing.id);
+}
+
+/** Set the vleesjes chosen for a template meal. Freezer lines are reconciled
+ *  against the inventory (restore the old selection, consume the new one); buy
+ *  lines only land on the shopping list at generation time. */
+export async function setMealVleesjes(mealId: string, vleesjes: TemplateVleesje[]): Promise<void> {
+  const db = getDb();
+  const clean: TemplateVleesje[] = (vleesjes || [])
+    .map((v) => ({
+      name: (v.name || "").trim(),
+      count: Math.max(1, Math.floor(Number(v.count) || 1)),
+      source: v.source === "buy" ? ("buy" as const) : ("freezer" as const),
+    }))
+    .filter((v) => v.name);
+
+  const { data: meal } = await db.from("plan_meals").select("template_vleesjes").eq("id", mealId).maybeSingle();
+  const oldFreezer = freezerTotals((meal?.template_vleesjes || []) as TemplateVleesje[]);
+  const newFreezer = freezerTotals(clean);
+
+  for (const { name, count } of oldFreezer.values()) await restoreVleesje(db, name, count);
+  for (const { name, count } of newFreezer.values()) await consumeVleesje(db, name, count);
+
+  const { error } = await db.from("plan_meals").update({ template_vleesjes: clean }).eq("id", mealId);
+  if (error) throw error;
+  revalidatePath("/planning");
+  revalidatePath("/vleesjes");
 }
 
 export async function setMealPotjes(mealId: string, n: number): Promise<void> {

@@ -128,3 +128,84 @@
     @apply font-sans;
     }
 }
+/* ---------------------------------------------------------------------------
+   Boodschappenlijstje rich editor (TipTap). No typography plugin — style the
+   content blocks explicitly so headings, lists and checkboxes read clearly.
+   --------------------------------------------------------------------------- */
+.tiptap :first-child {
+  margin-top: 0;
+}
+.tiptap h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 1.1rem 0 0.5rem;
+}
+.tiptap h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.4rem;
+  color: var(--primary);
+}
+.tiptap h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0.8rem 0 0.3rem;
+}
+.tiptap p {
+  margin: 0.3rem 0;
+  line-height: 1.6;
+}
+.tiptap ul,
+.tiptap ol {
+  margin: 0.3rem 0;
+  padding-left: 1.4rem;
+}
+.tiptap ul {
+  list-style: disc;
+}
+.tiptap ol {
+  list-style: decimal;
+}
+.tiptap li {
+  margin: 0.15rem 0;
+}
+.tiptap strong {
+  font-weight: 600;
+}
+/* Task lists (checkboxes) */
+.tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.1rem;
+}
+.tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+.tiptap ul[data-type="taskList"] li > label {
+  margin-top: 0.28rem;
+  user-select: none;
+}
+.tiptap ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tiptap ul[data-type="taskList"] input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.tiptap ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+/* Placeholder for the empty editor */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}

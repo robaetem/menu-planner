@@ -6,6 +6,7 @@ import type { Diner, PlanMealWithRecipe, PlanningDay, Potje } from "@/lib/types"
 import { ModePill } from "./mode-pill";
 import { MealCard } from "./meal-card";
 import { AddMealButton } from "./add-meal-buttons";
+import { DayNote } from "./day-note";
 
 type ModeOption = { value: string; label: string };
 
@@ -18,6 +19,7 @@ export function DayCard({
   selected,
   onToggleSelect,
   onViewMeal,
+  onPickVleesje,
 }: {
   planningDay: PlanningDay;
   diners: Diner[];
@@ -27,6 +29,7 @@ export function DayCard({
   selected: boolean;
   onToggleSelect: () => void;
   onViewMeal: (meal: PlanMealWithRecipe) => void;
+  onPickVleesje: (meal: PlanMealWithRecipe) => void;
 }) {
   const { day_date, row } = planningDay;
   const meals = row?.meals ?? [];
@@ -56,9 +59,11 @@ export function DayCard({
         />
       </div>
 
-      <div className="space-y-2">
+      <DayNote dayDate={day_date} note={row?.note ?? null} />
+
+      <div className="mt-2 space-y-2">
         {both.map((m) => (
-          <MealCard key={m.id} meal={m} full diners={diners} onView={() => onViewMeal(m)} />
+          <MealCard key={m.id} meal={m} full diners={diners} onView={() => onViewMeal(m)} onPickVleesje={() => onPickVleesje(m)} />
         ))}
 
         {both.length === 0 && (
@@ -66,7 +71,7 @@ export function DayCard({
             {amber.length ? (
               <div className="space-y-2">
                 {amber.map((m) => (
-                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} />
+                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} onPickVleesje={() => onPickVleesje(m)} />
                 ))}
               </div>
             ) : (
@@ -75,7 +80,7 @@ export function DayCard({
             {robin.length ? (
               <div className="space-y-2">
                 {robin.map((m) => (
-                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} />
+                  <MealCard key={m.id} meal={m} full={false} diners={diners} onView={() => onViewMeal(m)} onPickVleesje={() => onPickVleesje(m)} />
                 ))}
               </div>
             ) : (

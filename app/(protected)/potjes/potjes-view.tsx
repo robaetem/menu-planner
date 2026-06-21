@@ -28,8 +28,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { formatMonthDay } from "@/lib/date";
 import type { Diner, Potje } from "@/lib/types";
 import { createPotje, deletePotje, setPotjeCount } from "./actions";
+
+type Filter = "robin" | "amber" | "samen";
 
 export function PotjesView({
   potjes,
@@ -42,10 +45,24 @@ export function PotjesView({
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState<Potje | null>(null);
+  const [filter, setFilter] = React.useState<Filter | null>(null);
   const router = useRouter();
   const [, start] = useTransition();
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
+
+  // Badge totals: Robin/Amber are sums of instances; Samen counts the jars that
+  // exist for BOTH (min per potje), so a shared potje is counted in all three.
+  const robinTotal = potjes.reduce((s, p) => s + p.robin_count, 0);
+  const amberTotal = potjes.reduce((s, p) => s + p.amber_count, 0);
+  const samenTotal = potjes.reduce((s, p) => s + Math.min(p.robin_count, p.amber_count), 0);
+
+  function matches(p: Potje, f: Filter): boolean {
+    if (f === "robin") return p.robin_count > 0;
+    if (f === "amber") return p.amber_count > 0;
+    return p.robin_count > 0 && p.amber_count > 0;
+  }
+  const shown = filter ? potjes.filter((p) => matches(p, filter)) : potjes;
 
   function run(fn: () => Promise<void>) {
     start(async () => {
@@ -71,6 +88,14 @@ export function PotjesView({
         </Button>
       </div>
 
+      {potjes.length > 0 && (
+        <div className="mt-5 flex flex-wrap gap-2">
+          <FilterBadge label={robinLabel} count={robinTotal} active={filter === "robin"} onClick={() => setFilter((f) => (f === "robin" ? null : "robin"))} />
+          <FilterBadge label={amberLabel} count={amberTotal} active={filter === "amber"} onClick={() => setFilter((f) => (f === "amber" ? null : "amber"))} />
+          <FilterBadge label="Samen" count={samenTotal} active={filter === "samen"} onClick={() => setFilter((f) => (f === "samen" ? null : "samen"))} />
+        </div>
+      )}
+
       {potjes.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
           <div className="flex size-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-600 dark:bg-sky-950/50 dark:text-sky-300">
@@ -84,12 +109,19 @@ export function PotjesView({
             <Plus className="size-4" /> Eerste potje toevoegen
           </Button>
         </div>
+      ) : shown.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
+          Geen potjes voor deze filter.
+        </div>
       ) : (
         <div className="mt-6 space-y-3">
-          {potjes.map((p) => (
+          {shown.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-3 rounded-xl border bg-card p-4">
               <div className="min-w-0">
-                <p className="font-medium">{p.name}</p>
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                  <p className="font-medium">{p.name}</p>
+                  <span className="text-xs text-muted-foreground">{formatMonthDay(p.created_at)}</span>
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <CountPill
                     label={robinLabel}
@@ -146,6 +178,35 @@ export function PotjesView({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function FilterBadge({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+        active
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border bg-card text-foreground hover:border-primary/40",
+      )}
+    >
+      {label}
+      <span className={cn("tabular-nums", active ? "text-primary-foreground/90" : "text-muted-foreground")}>{count}</span>
+    </button>
   );
 }
 

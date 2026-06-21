@@ -34,6 +34,8 @@ export type Recipe = {
   prep_minutes: number | null;
   uses_fresh_veg: boolean;
   freezer_friendly: boolean;
+  /** A recipe with a `[vleesje]` slot — the meat is chosen at planning time. */
+  has_vleesje: boolean;
   base_servings: number;
   method: string | null;
   notes: string | null;
@@ -80,6 +82,38 @@ export type Potje = {
   created_at: string;
 };
 
+/** Raw meat in the freezer — single shared count (not portioned per person). */
+export type Vleesje = {
+  id: string;
+  name: string;
+  count: number;
+  sort: number;
+  created_at: string;
+};
+
+/** A user-managed shopping section (Groenten & Fruit, Vlees & Vis, …). */
+export type IngredientCategory = {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: string;
+};
+
+/** Cached category for one ingredient name. `source` = who decided it. */
+export type IngredientCategoryEntry = {
+  id: string;
+  name: string;
+  category_id: string | null;
+  source: "ai" | "user";
+};
+
+/** One vleesje chosen for a planned template meal. */
+export type TemplateVleesje = {
+  name: string;
+  count: number;
+  source: "freezer" | "buy";
+};
+
 export type PlanMeal = {
   id: string;
   plan_day_id: string;
@@ -93,6 +127,7 @@ export type PlanMeal = {
   diner_keys: string[];
   freezer_servings: number;
   from_freezer: boolean; // true = "Potje diepvries" (blue, eat from stock)
+  template_vleesjes: TemplateVleesje[];
   note: string | null;
   sort: number;
 };

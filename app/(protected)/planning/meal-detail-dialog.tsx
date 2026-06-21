@@ -1,6 +1,7 @@
 "use client";
 
-import { Snowflake, Users, User, Leaf } from "lucide-react";
+import { Snowflake, Users, User, Leaf, Beef, ShoppingCart } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { serializeIngredient } from "@/lib/recipes/ingredient-parser";
-import { assigneeLabel } from "./config";
+import { assigneeLabel, isVleesjeTemplate, resolveTitle } from "./config";
 import type { Diner, PlanMealWithRecipe, RecipeWithIngredients } from "@/lib/types";
 
 export function MealDetailDialog({
@@ -19,15 +20,20 @@ export function MealDetailDialog({
   diners,
   open,
   onOpenChange,
+  onPickVleesje,
 }: {
   meal: PlanMealWithRecipe | null;
   recipe: RecipeWithIngredients | null;
   diners: Diner[];
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  onPickVleesje: () => void;
 }) {
   if (!meal) return null;
-  const title = recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
+  const baseTitle = recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
+  const isTemplate = isVleesjeTemplate(recipe ?? { title: baseTitle });
+  const title = isTemplate ? resolveTitle(baseTitle, meal.template_vleesjes) : baseTitle;
+  const vleesjes = meal.template_vleesjes ?? [];
   const who = meal.assignee;
   const whoLabel =
     who === "both"
@@ -68,6 +74,46 @@ export function MealDetailDialog({
         </DialogHeader>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {isTemplate && (
+            <section>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                  <Beef className="size-4 text-rose-500" /> Vleesje
+                </h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onPickVleesje();
+                  }}
+                >
+                  <Beef className="size-3.5" /> {vleesjes.length ? "Wijzig" : "Kies vleesje"}
+                </Button>
+              </div>
+              {vleesjes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nog geen vleesje gekozen.</p>
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {vleesjes.map((v, i) => (
+                    <li key={`${v.name}-${i}`} className="flex items-center gap-2 px-3.5 py-2 text-sm">
+                      {v.source === "freezer" ? (
+                        <Snowflake className="size-3.5 text-sky-500" />
+                      ) : (
+                        <ShoppingCart className="size-3.5 text-amber-600" />
+                      )}
+                      <span className="flex-1">
+                        {v.count}× {v.name}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {v.source === "freezer" ? "uit de diepvries" : "te kopen"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {meal.from_freezer ? (
             <p className="text-sm text-muted-foreground">
               Dit potje komt uit de diepvries — er hoeft niets voor gekocht te worden.

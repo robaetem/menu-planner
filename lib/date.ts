@@ -44,3 +44,8 @@ export function formatRange(startIso: string, dayCount: number): string {
 export function weekdayName(iso: string): string {
   return cap(format(parseISO(iso), "EEEE", { locale: nl }));
 }
+
+/** "5 jun" — compact day + month, from a date or full timestamp. */
+export function formatMonthDay(iso: string): string {
+  return format(parseISO(iso), "d MMM", { locale: nl });
+}

@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Plus, Check } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Plus, Check, Sparkles, Beef } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import {
@@ -26,6 +27,7 @@ import {
   type IngRow,
 } from "./ingredient-list-editor";
 import { createRecipe, updateRecipe, type RecipeInput } from "./actions";
+import { suggestVleesje } from "./ai-actions";
 import { createTag } from "./tag-actions";
 
 export function RecipeEditorDialog({
@@ -49,6 +51,9 @@ export function RecipeEditorDialog({
   const [ingRows, setIngRows] = React.useState<IngRow[]>([]);
   const [method, setMethod] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  const [hasVleesje, setHasVleesje] = React.useState(false);
+  const [suggesting, setSuggesting] = React.useState(false);
+  const [suggestReason, setSuggestReason] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
@@ -57,8 +62,32 @@ export function RecipeEditorDialog({
     setIngRows(recipe ? rowsFromIngredients(recipe.ingredients) : [emptyRow()]);
     setMethod(recipe?.method ?? "");
     setNotes(recipe?.notes ?? "");
+    setHasVleesje(recipe?.has_vleesje ?? false);
+    setSuggestReason("");
     setNewTag("");
   }, [open, recipe]);
+
+  async function onSuggestVleesje() {
+    if (suggesting) return;
+    setSuggesting(true);
+    try {
+      const names = ingRows.map((r) => r.name.trim()).filter(Boolean);
+      const res = await suggestVleesje(title, names);
+      setSuggestReason(res.reason || (res.isVleesje ? "Dit recept bevat een vervangbaar vleesje." : "Geen duidelijk vleesje gevonden."));
+      if (res.isVleesje) setHasVleesje(true);
+    } catch (e) {
+      toast.error("AI-suggestie mislukt.");
+      console.error(e);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  // Typing "[vleesje]" in the name is itself a template declaration.
+  const titleHasToken = /\[vleesje\]/i.test(title);
+  React.useEffect(() => {
+    if (titleHasToken) setHasVleesje(true);
+  }, [titleHasToken]);
 
   function toggleTag(value: string) {
     setTags((prev) => (prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]));
@@ -95,6 +124,7 @@ export function RecipeEditorDialog({
       tags,
       method: method.trim() || null,
       notes: notes.trim() || null,
+      has_vleesje: hasVleesje,
       ingredients: ingredientRowsFromEditor(ingRows),
     };
     setPending(true);
@@ -186,7 +216,35 @@ export function RecipeEditorDialog({
           </div>
 
           <div className="space-y-2">
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Beef className="size-4 text-rose-500" />
+                  <div>
+                    <Label className="cursor-default">Vleesje-template</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Het vlees wordt bij het plannen gekozen (uit de diepvries of te kopen).
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={onSuggestVleesje} disabled={suggesting || !title.trim()}>
+                    <Sparkles className="size-3.5" /> {suggesting ? "…" : "AI"}
+                  </Button>
+                  <Switch checked={hasVleesje} onCheckedChange={(v) => setHasVleesje(!!v)} aria-label="Vleesje-template" />
+                </div>
+              </div>
+              {suggestReason && (
+                <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs text-muted-foreground">{suggestReason}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <Label>Ingrediënten</Label>
+            <p className="-mt-1 text-xs text-muted-foreground">
+              {hasVleesje ? "Voeg hier alles behalve het vlees toe — dat kies je bij het plannen." : " "}
+            </p>
             <IngredientListEditor rows={ingRows} onChange={setIngRows} />
           </div>
 

@@ -10,6 +10,7 @@ export type RecipeInput = {
   tags: string[];
   method: string | null;
   notes: string | null;
+  has_vleesje: boolean;
   ingredients: IngredientRow[];
 };
 
@@ -32,6 +33,8 @@ function recipeFields(input: RecipeInput) {
     base_servings: 2,
     uses_fresh_veg: input.tags.includes("verse groenten"),
     freezer_friendly: input.tags.includes("diepvriesvriendelijk"),
+    // Writing "[vleesje]" in the title is enough to make it a template recipe.
+    has_vleesje: input.has_vleesje || /\[vleesje\]/i.test(input.title),
     method: input.method,
     notes: input.notes,
   };

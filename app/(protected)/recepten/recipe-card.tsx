@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Beef } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,8 +58,13 @@ export function RecipeCard({
       </CardHeader>
 
       <CardContent className="px-4 pt-1 pb-4">
-        {recipe.tags.length > 0 ? (
+        {recipe.tags.length > 0 || recipe.has_vleesje ? (
           <div className="flex flex-wrap gap-1.5">
+            {recipe.has_vleesje && (
+              <Badge className="gap-1 border-rose-300 bg-rose-100 font-normal text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">
+                <Beef className="size-3" /> vleesje
+              </Badge>
+            )}
             {recipe.tags.map((tag) => (
               <Badge key={tag} variant="secondary" className="font-normal capitalize">
                 {tag}

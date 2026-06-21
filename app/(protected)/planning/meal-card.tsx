@@ -1,14 +1,16 @@
 "use client";
 
+import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Trash2, Snowflake, Minus, Plus } from "lucide-react";
+import { Trash2, Snowflake, Minus, Plus, Beef } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Diner, PlanMealWithRecipe } from "@/lib/types";
 import { deleteMeal, setMealPotjes } from "./actions";
+import { isVleesjeTemplate, vleesjeSummary } from "./config";
 
 function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
   const keys = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
@@ -20,16 +22,20 @@ export function MealCard({
   full,
   diners,
   onView,
+  onPickVleesje,
 }: {
   meal: PlanMealWithRecipe;
   full: boolean;
   diners: Diner[];
   onView: () => void;
+  onPickVleesje: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const potje = meal.from_freezer;
-  const title = meal.recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
+  const baseTitle = meal.recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
+  const isTemplate = isVleesjeTemplate(meal.recipe);
+  const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
 
   function run(fn: () => Promise<void>) {
     start(async () => {
@@ -56,7 +62,17 @@ export function MealCard({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="font-medium leading-snug text-foreground">{title}</p>
+        <p className="font-medium leading-snug text-foreground">
+          {isTemplate ? (
+            <TemplateTitle
+              title={baseTitle}
+              chosen={vleesjeChosen}
+              onPick={() => onPickVleesje()}
+            />
+          ) : (
+            baseTitle
+          )}
+        </p>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -82,6 +98,61 @@ export function MealCard({
         )}
       </div>
     </div>
+  );
+}
+
+/** Render a recipe title, turning the "[vleesje]" token into a clickable chip
+ *  (the chosen vleesjes, or "kies vleesje"). When the title has no token, the
+ *  chip is appended so a template recipe always exposes the picker. */
+function TemplateTitle({
+  title,
+  chosen,
+  onPick,
+}: {
+  title: string;
+  chosen: string;
+  onPick: () => void;
+}) {
+  const parts = title.split(/\[vleesje\]/i);
+  const chip = <VleesjeChip key="chip" chosen={chosen} onPick={onPick} />;
+  if (parts.length === 1) {
+    return (
+      <>
+        {title}{" "}
+        {chip}
+      </>
+    );
+  }
+  return (
+    <>
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>
+          {p}
+          {i < parts.length - 1 && chip}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+function VleesjeChip({ chosen, onPick }: { chosen: string; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onPick();
+      }}
+      className={cn(
+        "mx-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 align-middle text-xs font-semibold transition-colors",
+        chosen
+          ? "border-rose-300 bg-rose-100 text-rose-700 hover:border-rose-400 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300"
+          : "border-dashed border-rose-400/60 text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/30",
+      )}
+    >
+      <Beef className="size-3" />
+      {chosen || "kies vleesje"}
+    </button>
   );
 }
 

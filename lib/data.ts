@@ -1,6 +1,17 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
-import type { Household, PlanDayWithMeals, PlanMode, PlanningDay, Potje, RecipeTag, RecipeWithIngredients } from "@/lib/types";
+import type {
+  Household,
+  IngredientCategory,
+  IngredientCategoryEntry,
+  PlanDayWithMeals,
+  PlanMode,
+  PlanningDay,
+  Potje,
+  RecipeTag,
+  RecipeWithIngredients,
+  Vleesje,
+} from "@/lib/types";
 
 const DEFAULT_DINERS = [
   { key: "robin", label: "Robin" },
@@ -44,6 +55,55 @@ export async function listPotjes(): Promise<Potje[]> {
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []) as Potje[];
+}
+
+export async function listVleesjes(): Promise<Vleesje[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("vleesjes")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as Vleesje[];
+}
+
+/** Every vleesje name ever entered — powers the add/pick autocomplete. */
+export async function listVleesjeNames(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from("vleesje_names").select("name").order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: { name: string }) => r.name);
+}
+
+/** The household's single boodschappenlijstje document (TipTap JSON), or null. */
+export async function getShoppingDoc(): Promise<unknown | null> {
+  const db = getDb();
+  const { data, error } = await db.from("shopping_doc").select("content").limit(1).maybeSingle();
+  if (error) throw error;
+  return data?.content ?? null;
+}
+
+/** User-managed shopping sections, ordered. */
+export async function listCategories(): Promise<IngredientCategory[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("ingredient_categories")
+    .select("*")
+    .order("sort", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as IngredientCategory[];
+}
+
+/** The cached ingredient-name -> category map. */
+export async function listCategoryMap(): Promise<IngredientCategoryEntry[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("ingredient_category_map")
+    .select("id, name, category_id, source")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []) as IngredientCategoryEntry[];
 }
 
 export async function listTags(): Promise<RecipeTag[]> {

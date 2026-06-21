@@ -7,12 +7,23 @@ import { toast } from "sonner";
 import { CalendarPlus, ShoppingCart, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, Potje, RecipeWithIngredients } from "@/lib/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, Potje, RecipeWithIngredients, Vleesje } from "@/lib/types";
 import { DayCard } from "./day-card";
-import { ShoppingSheet } from "./shopping-sheet";
 import { MealDetailDialog } from "./meal-detail-dialog";
 import { ModeManagerDialog } from "./mode-manager-dialog";
+import { VleesjePickerDialog } from "./vleesje-picker-dialog";
 import { extendDays } from "./actions";
+import { generateShoppingList } from "../boodschappenlijstje/actions";
 
 export function PlanningView({
   days,
@@ -20,19 +31,25 @@ export function PlanningView({
   diners,
   potjes,
   modes,
+  vleesjes,
+  vleesjeNames,
 }: {
   days: PlanningDay[];
   recipes: RecipeWithIngredients[];
   diners: Diner[];
   potjes: Potje[];
   modes: PlanMode[];
+  vleesjes: Vleesje[];
+  vleesjeNames: string[];
 }) {
   const router = useRouter();
   const [extending, startExtend] = useTransition();
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [shopOpen, setShopOpen] = React.useState(false);
+  const [confirmShop, setConfirmShop] = React.useState(false);
+  const [generating, setGenerating] = React.useState(false);
   const [managingModes, setManagingModes] = React.useState(false);
   const [viewing, setViewing] = React.useState<PlanMealWithRecipe | null>(null);
+  const [picking, setPicking] = React.useState<PlanMealWithRecipe | null>(null);
 
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
@@ -52,8 +69,22 @@ export function PlanningView({
     });
   }
 
-  const selectedDays = days.filter((d) => selected.has(d.day_date) && d.row).map((d) => d.row!);
+  const selectedDates = [...selected].sort();
   const count = selected.size;
+
+  function onGenerate() {
+    setGenerating(true);
+    generateShoppingList(selectedDates)
+      .then(() => {
+        setConfirmShop(false);
+        router.push("/boodschappenlijstje");
+      })
+      .catch((e) => {
+        toast.error("Boodschappenlijstje maken mislukt.");
+        console.error(e);
+      })
+      .finally(() => setGenerating(false));
+  }
 
   function onExtend() {
     startExtend(async () => {
@@ -81,7 +112,7 @@ export function PlanningView({
           <Button variant="outline" onClick={() => setManagingModes(true)} className="shrink-0">
             <SlidersHorizontal className="size-4" /> Situaties
           </Button>
-          <ShopButton count={count} onClick={() => setShopOpen(true)} />
+          <ShopButton count={count} onClick={() => setConfirmShop(true)} />
         </div>
       </div>
 
@@ -97,6 +128,7 @@ export function PlanningView({
             selected={selected.has(d.day_date)}
             onToggleSelect={() => toggle(d.day_date)}
             onViewMeal={(m) => setViewing(m)}
+            onPickVleesje={(m) => setPicking(m)}
           />
         ))}
       </div>
@@ -105,7 +137,29 @@ export function PlanningView({
         <CalendarPlus className="size-4" /> {extending ? "Toevoegen…" : "Voeg dagen toe"}
       </Button>
 
-      <ShoppingSheet open={shopOpen} onOpenChange={setShopOpen} days={selectedDays} recipes={recipes} />
+      <AlertDialog open={confirmShop} onOpenChange={(o) => !generating && setConfirmShop(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Boodschappenlijstje maken?</AlertDialogTitle>
+            <AlertDialogDescription>
+              De ingrediënten van {count} {count === 1 ? "geselecteerde dag" : "geselecteerde dagen"} worden
+              ingedeeld per categorie. <strong>Je huidige boodschappenlijstje wordt overschreven.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={generating}>Annuleren</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                onGenerate();
+              }}
+              disabled={generating}
+            >
+              {generating ? "Maken…" : "Overschrijven"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ModeManagerDialog
         open={managingModes}
@@ -121,6 +175,20 @@ export function PlanningView({
         diners={diners}
         open={viewing !== null}
         onOpenChange={(o) => !o && setViewing(null)}
+        onPickVleesje={() => {
+          const m = viewing;
+          setViewing(null);
+          if (m) setPicking(m);
+        }}
+      />
+
+      <VleesjePickerDialog
+        meal={picking}
+        recipeTitle={picking?.recipe?.title ?? picking?.freeform_title ?? "Gerecht"}
+        vleesjes={vleesjes}
+        vleesjeNames={vleesjeNames}
+        open={picking !== null}
+        onOpenChange={(o) => !o && setPicking(null)}
       />
     </div>
   );
