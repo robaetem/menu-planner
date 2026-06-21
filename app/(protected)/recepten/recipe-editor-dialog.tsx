@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Check, Sparkles, Beef } from "lucide-react";
+import { Plus, Check, Beef } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import {
@@ -27,7 +27,6 @@ import {
   type IngRow,
 } from "./ingredient-list-editor";
 import { createRecipe, updateRecipe, type RecipeInput } from "./actions";
-import { suggestVleesje } from "./ai-actions";
 import { createTag } from "./tag-actions";
 
 export function RecipeEditorDialog({
@@ -52,8 +51,6 @@ export function RecipeEditorDialog({
   const [method, setMethod] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [hasVleesje, setHasVleesje] = React.useState(false);
-  const [suggesting, setSuggesting] = React.useState(false);
-  const [suggestReason, setSuggestReason] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
@@ -63,25 +60,8 @@ export function RecipeEditorDialog({
     setMethod(recipe?.method ?? "");
     setNotes(recipe?.notes ?? "");
     setHasVleesje(recipe?.has_vleesje ?? false);
-    setSuggestReason("");
     setNewTag("");
   }, [open, recipe]);
-
-  async function onSuggestVleesje() {
-    if (suggesting) return;
-    setSuggesting(true);
-    try {
-      const names = ingRows.map((r) => r.name.trim()).filter(Boolean);
-      const res = await suggestVleesje(title, names);
-      setSuggestReason(res.reason || (res.isVleesje ? "Dit recept bevat een vervangbaar vleesje." : "Geen duidelijk vleesje gevonden."));
-      if (res.isVleesje) setHasVleesje(true);
-    } catch (e) {
-      toast.error("AI-suggestie mislukt.");
-      console.error(e);
-    } finally {
-      setSuggesting(false);
-    }
-  }
 
   // Typing "[vleesje]" in the name is itself a template declaration.
   const titleHasToken = /\[vleesje\]/i.test(title);
@@ -227,16 +207,8 @@ export function RecipeEditorDialog({
                     </p>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button type="button" variant="ghost" size="sm" onClick={onSuggestVleesje} disabled={suggesting || !title.trim()}>
-                    <Sparkles className="size-3.5" /> {suggesting ? "…" : "AI"}
-                  </Button>
-                  <Switch checked={hasVleesje} onCheckedChange={(v) => setHasVleesje(!!v)} aria-label="Vleesje-template" />
-                </div>
+                <Switch checked={hasVleesje} onCheckedChange={(v) => setHasVleesje(!!v)} aria-label="Vleesje-template" />
               </div>
-              {suggestReason && (
-                <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs text-muted-foreground">{suggestReason}</p>
-              )}
             </div>
           </div>
 

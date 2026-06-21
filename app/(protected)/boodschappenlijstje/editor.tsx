@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
+import "./editor.css";
 import {
   Heading1,
   Heading2,
@@ -56,20 +57,11 @@ export function ShoppingEditor({
     },
   });
 
-  // Replace the document when the server content changes identity (e.g. after
-  // "Maak boodschappenlijstje" regenerates it). Guarded so local typing isn't
-  // clobbered by the same value coming back.
-  const lastApplied = React.useRef<string>("");
-  React.useEffect(() => {
-    if (!editor) return;
-    const incoming = JSON.stringify(content ?? EMPTY_DOC);
-    if (incoming === lastApplied.current) return;
-    const current = JSON.stringify(editor.getJSON());
-    if (incoming !== current) {
-      editor.commands.setContent((content ?? EMPTY_DOC) as object, { emitUpdate: false });
-    }
-    lastApplied.current = incoming;
-  }, [content, editor]);
+  // The editor is UNCONTROLLED after mount: it owns the document and autosaves.
+  // We deliberately do NOT sync the `content` prop back in on every render — that
+  // fought with live typing (a saved value echoing back reset the doc mid-edit).
+  // Genuinely new content (after "Maak boodschappenlijstje") arrives via a fresh
+  // navigation, which remounts this component with the new initial content.
 
   React.useEffect(() => {
     return () => {

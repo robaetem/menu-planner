@@ -1,30 +1,6 @@
 import { chatJson } from "./openrouter";
 
-/** Touchpoint (a): does this recipe revolve around a piece of meat that could be
- *  swapped out (worst, hamburger, kipfilet, …)? Used to offer "make a [vleesje]
- *  template" when saving a recipe. */
-export async function suggestVleesjeTemplate(
-  title: string,
-  ingredients: string[],
-): Promise<{ isVleesje: boolean; reason: string }> {
-  const parsed = await chatJson<{ isVleesje?: boolean; reason?: string }>(
-    [
-      {
-        role: "system",
-        content:
-          "Je beoordeelt Nederlandse recepten. Bevat dit recept een stuk vlees dat je makkelijk kan vervangen " +
-          "door een ander vleesje (bv. worst, hamburger, kipfilet, gehakt, spek)? Zo ja, dan is het een goede " +
-          'kandidaat voor een "[vleesje]"-template. Antwoord ALLEEN met JSON: ' +
-          '{"isVleesje": boolean, "reason": "korte uitleg in het Nederlands"}.',
-      },
-      { role: "user", content: JSON.stringify({ titel: title, ingrediënten: ingredients }) },
-    ],
-    { maxTokens: 200 },
-  );
-  return { isVleesje: !!parsed?.isVleesje, reason: parsed?.reason ?? "" };
-}
-
-/** Touchpoint (b)+(c): turn freeform "te kopen" text ("2 hamburgers en een
+/** Turn freeform "te kopen" text ("2 hamburgers en een
  *  worst") into structured { name, count } lines, snapping each name onto an
  *  existing vleesje name when it's clearly the same thing. Falls back to a naive
  *  split if the model is unavailable. */

@@ -21,7 +21,9 @@ export async function saveShoppingDoc(content: unknown): Promise<void> {
     const { error } = await db.from("shopping_doc").insert({ content });
     if (error) throw error;
   }
-  revalidatePath("/boodschappenlijstje");
+  // No revalidatePath here: autosave must NOT refresh the route, or the saved
+  // doc echoes back into the live editor and clobbers in-flight typing. The
+  // editor owns the document; the generate flow reads fresh on navigation.
 }
 
 /** Aggregate the selected days into a categorised boodschappenlijstje and
@@ -113,6 +115,9 @@ export async function generateShoppingList(dates: string[]): Promise<void> {
 
   const doc = buildShoppingDoc(groups);
   await saveShoppingDoc(doc);
+  // Safe here (runs from Planning, not the editor): invalidate so the freshly
+  // generated list shows when we navigate to the boodschappenlijstje.
+  revalidatePath("/boodschappenlijstje");
 }
 
 function dedupe(lines: string[]): string[] {
