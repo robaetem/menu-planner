@@ -33,15 +33,17 @@ export function RecipeCard({
       className="group relative cursor-pointer gap-0 overflow-hidden py-0 transition-all hover:border-primary/30 hover:shadow-md"
     >
       {imageUrl && (
-        <div className="relative aspect-[4/3] overflow-hidden bg-muted">
-          <Image
-            src={imageUrl}
-            alt={recipe.title}
-            fill
-            sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-            unoptimized
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-          />
+        <div className="px-3 pt-3">
+          <div className="relative aspect-[16/9] overflow-hidden rounded-lg bg-muted">
+            <Image
+              src={imageUrl}
+              alt={recipe.title}
+              fill
+              sizes="(min-width: 1024px) 31vw, (min-width: 640px) 47vw, calc(100vw - 2rem)"
+              unoptimized
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
+            />
+          </div>
         </div>
       )}
       <CardHeader className="gap-0 px-4 pt-4 pb-2">
