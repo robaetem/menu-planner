@@ -1,8 +1,9 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, ShoppingBasket, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import type { Ingredient, IngredientRow } from "@/lib/types";
 
 // "Samen" amounts are entered for the two of us together; per_serving values are
@@ -18,13 +19,14 @@ export type IngRow = {
   samen: string;
   amber: string;
   robin: string;
+  includeInShopping: boolean;
 };
 
 let counter = 0;
 const newKey = () => `row-${counter++}`;
 
 export function emptyRow(): IngRow {
-  return { key: newKey(), name: "", unit: "gram", samen: "", amber: "", robin: "" };
+  return { key: newKey(), name: "", unit: "gram", samen: "", amber: "", robin: "", includeInShopping: true };
 }
 
 function num(s: string): number | null {
@@ -57,12 +59,13 @@ export function rowsFromIngredients(ings: Ingredient[]): IngRow[] {
           samen: "",
           amber: ig.amounts_per_person?.amber != null ? fmt(Number(ig.amounts_per_person.amber)) : "",
           robin: ig.amounts_per_person?.robin != null ? fmt(Number(ig.amounts_per_person.robin)) : "",
+          includeInShopping: ig.include_in_shopping ?? true,
         };
       }
       const base = ig.amount_max ?? ig.amount;
       // per_serving shown ×HOUSEHOLD ("for two"); legacy fixed shown as-is.
       const samen = base != null ? fmt(ig.scaling === "per_serving" ? base * HOUSEHOLD : base) : "";
-      return { key: newKey(), name: ig.name, unit, samen, amber: "", robin: "" };
+      return { key: newKey(), name: ig.name, unit, samen, amber: "", robin: "", includeInShopping: ig.include_in_shopping ?? true };
     });
 }
 
@@ -71,7 +74,7 @@ export function ingredientRowsFromEditor(rows: IngRow[]): IngredientRow[] {
   return rows
     .filter((r) => r.name.trim())
     .map((r, i) => {
-      const base = { name: r.name.trim(), unit: r.unit, is_fresh: false, sort: i };
+      const base = { name: r.name.trim(), unit: r.unit, is_fresh: false, include_in_shopping: r.includeInShopping, sort: i };
       const rb = num(r.robin);
       const am = num(r.amber);
       if (rb != null || am != null) {
@@ -135,6 +138,17 @@ export function IngredientListEditor({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-muted/45 px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              <ShoppingBasket className="size-4 shrink-0" />
+              <span className="truncate">Boodschappenlijst</span>
+            </div>
+            <Switch
+              checked={r.includeInShopping}
+              onCheckedChange={(v) => update(r.key, { includeInShopping: !!v })}
+              aria-label={`${r.name || "Ingrediënt"} op boodschappenlijst`}
+            />
           </div>
         </div>
       ))}

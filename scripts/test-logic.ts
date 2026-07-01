@@ -21,7 +21,7 @@ const wortelText = `Robin 2 / Amber 1 stuk hamburger
 const wortelRows = toIngredientRows(parseIngredientsText(wortelText), 2).map((r) => ({ ...r, recipe_id: "w", id: r.name }));
 eq("hamburger per_person", wortelRows[0], {
   name: "hamburger", unit: "stuk", scaling: "per_person", amount: null, amount_max: null,
-  amounts_per_person: { robin: 2, amber: 1 }, is_fresh: false, sort: 0, recipe_id: "w", id: "hamburger",
+  amounts_per_person: { robin: 2, amber: 1 }, is_fresh: false, include_in_shopping: true, sort: 0, recipe_id: "w", id: "hamburger",
 });
 eq("wortels per_serving normalized 175", { a: wortelRows[1].amount, u: wortelRows[1].unit, s: wortelRows[1].scaling }, { a: 175, u: "g", s: "per_serving" });
 eq("aardappelen per_serving normalized 150", wortelRows[2].amount, 150);
@@ -49,7 +49,19 @@ eq("parse 'Amber potje' (no freezer count)", parseMealLine("Amber potje"), { coo
 
 // ---- shopping aggregation (the worked example) ----
 const ingredientsByRecipe: Record<string, any[]> = {
-  w: wortelRows,
+  w: [...wortelRows, {
+    id: "servet",
+    recipe_id: "w",
+    name: "servet",
+    unit: "stuk",
+    scaling: "fixed",
+    amount: 1,
+    amount_max: null,
+    amounts_per_person: {},
+    is_fresh: false,
+    include_in_shopping: false,
+    sort: 99,
+  }],
   b: ballRows,
 };
 const days: any[] = [
@@ -61,10 +73,11 @@ const res = computeShoppingList(days, ingredientsByRecipe);
 const byKey = Object.fromEntries(res.all.map((l) => [l.key, formatQuantity(l)]));
 eq("aardappelen merged 900 g", byKey["aardappelen|gram"], "900 g");
 eq("wortels 700 g", byKey["wortels|gram"], "700 g");
-eq("hamburger 3 stuk (Robin>Amber, potjes ignored)", byKey["hamburger|stuk"], "3 stuk");
+eq("hamburger 6 stuk (Robin>Amber, potjes add one extra round)", byKey["hamburger|stuk"], "6 stuk");
 eq("gehakt 1000 g (amount_max)", byKey["gehakt|gram"], "1000 g");
 eq("bonen 3 blik", byKey["bonen in tomatensaus|blik"], "3 blik");
 eq("tomatenstukjes 1 blik (fixed)", byKey["tomatenstukjes|blik"], "1 blik");
+eq("excluded ingredient ignored", byKey["servet|stuk"], undefined);
 eq("from_freezer ignored", res.mealsFromFreezer, 1);
 eq("meals counted", res.mealsCounted, 2);
 

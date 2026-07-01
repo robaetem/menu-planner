@@ -138,6 +138,7 @@ export function toIngredientRows(parsed: ParsedIngredient[], baseServings: numbe
     amount_max: p.scaling === "per_serving" && p.amount_max != null ? p.amount_max / b : p.amount_max,
     amounts_per_person: p.amounts_per_person,
     is_fresh: p.is_fresh,
+    include_in_shopping: true,
     sort: i,
   }));
 }

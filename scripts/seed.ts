@@ -15,6 +15,18 @@ const env = Object.fromEntries(
       return [l.slice(0, i), l.slice(i + 1)];
     }),
 );
+const targetRef = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
+
+if (process.env.ALLOW_DESTRUCTIVE_SEED !== targetRef) {
+  throw new Error(
+    [
+      "Refusing to run scripts/seed.ts because it deletes recipes, plan days, and potjes before inserting demo data.",
+      "This project already has real user data.",
+      `To run it anyway, set ALLOW_DESTRUCTIVE_SEED=${targetRef} for this command only.`,
+    ].join("\n"),
+  );
+}
+
 const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
   auth: { persistSession: false },
 });
@@ -25,7 +37,7 @@ type R = { title: string; tags: string[]; ingredients: SeedIng[]; method?: strin
 
 function toRows(ings: SeedIng[]): Omit<IngredientRow, never>[] {
   return ings.map((ig, i) => {
-    const base = { name: ig.name, unit: ig.unit, is_fresh: false, sort: i };
+    const base = { name: ig.name, unit: ig.unit, is_fresh: false, include_in_shopping: true, sort: i };
     if (ig.amber != null || ig.robin != null) {
       const pp: Record<string, number> = {};
       if (ig.robin != null) pp.robin = ig.robin;

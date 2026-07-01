@@ -99,6 +99,7 @@ export function computeShoppingList(
       // Potjes add extra rounds of the diners present: 2 diners + 2 potjes = 2 rounds.
       const potjeRounds = dinerCount > 0 ? factor / dinerCount : 1;
       for (const ig of ings) {
+        if (ig.include_in_shopping === false) continue;
         const a = ig.amount_max ?? ig.amount;
         if (ig.scaling === "per_serving") {
           add(ig.name, ig.unit, a != null ? a * factor : null, ig.is_fresh, label);

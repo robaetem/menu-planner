@@ -42,3 +42,7 @@ HANDOFF.md
 
 # Local validation screenshots (agent-browser)
 .screenshots/
+
+# Local data exports and agent planning notes
+.backups/
+docs/feature-implementations/

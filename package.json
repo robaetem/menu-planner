@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "data:backup": "node scripts/backup-data.mjs",
+    "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

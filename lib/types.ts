@@ -24,6 +24,7 @@ export type Ingredient = {
   amount_max: number | null;
   amounts_per_person: Record<string, number>;
   is_fresh: boolean;
+  include_in_shopping: boolean;
   sort: number;
 };
 
