@@ -1,4 +1,5 @@
 export const RECIPE_IMAGE_BUCKET = "recipe-images";
+export const RECIPE_IMAGE_PLACEHOLDER = "/recipe-placeholder.png";
 export const RECIPE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const RECIPE_IMAGE_URL_MAX_LENGTH = 2048;
 export const RECIPE_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif";

@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Check, Beef, Image as ImageIcon, Link2, Upload, X } from "lucide-react";
+import { Plus, Check, Beef, Link2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   getRecipeImageUrl,
@@ -25,6 +25,7 @@ import {
   normalizeRecipeImageUrl,
   RECIPE_IMAGE_ACCEPT,
   RECIPE_IMAGE_MAX_BYTES,
+  RECIPE_IMAGE_PLACEHOLDER,
   RECIPE_IMAGE_TYPES,
   RECIPE_IMAGE_URL_MAX_LENGTH,
 } from "@/lib/recipes/images";
@@ -216,7 +217,9 @@ export function RecipeEditorDialog({
   const remoteImageUrl = normalizeRecipeImageUrl(imageUrlText);
   const hasImageUrlError = imageUrlText.trim().length > 0 && !remoteImageUrl;
   const existingImageUrl = imageRemoved || imageUrlText.trim() ? null : getRecipeImageUrl(recipe?.image_path);
-  const shownImageUrl = imagePreviewUrl ?? remoteImageUrl ?? existingImageUrl;
+  const actualImageUrl = imagePreviewUrl ?? remoteImageUrl ?? existingImageUrl;
+  const shownImageUrl = actualImageUrl ?? RECIPE_IMAGE_PLACEHOLDER;
+  const showingPlaceholder = !actualImageUrl;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -242,24 +245,18 @@ export function RecipeEditorDialog({
 
           <div className="space-y-2">
             <Label>Foto</Label>
-            <div className="overflow-hidden rounded-xl border bg-card">
+            <div className="max-w-xs overflow-hidden rounded-xl border bg-card">
               <div className="relative aspect-[16/9] bg-muted">
-                {shownImageUrl ? (
-                  <Image
-                    src={shownImageUrl}
-                    alt={title || recipe?.title || "Receptfoto"}
-                    fill
-                    sizes="(min-width: 640px) 640px, 100vw"
-                    unoptimized
-                    className="object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-muted-foreground">
-                    <ImageIcon className="size-10" />
-                  </div>
-                )}
+                <Image
+                  src={shownImageUrl}
+                  alt={showingPlaceholder ? "Geen receptfoto" : title || recipe?.title || "Receptfoto"}
+                  fill
+                  sizes="320px"
+                  unoptimized
+                  className={cn(showingPlaceholder ? "object-contain p-4" : "object-cover")}
+                />
               </div>
-              <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+              <div className="flex flex-col gap-2 p-3">
                 <input
                   ref={imageInputRef}
                   type="file"
@@ -275,7 +272,7 @@ export function RecipeEditorDialog({
                   disabled={pending}
                   className="shrink-0"
                 >
-                  <Upload className="size-4" /> {shownImageUrl ? "Wijzig foto" : "Kies foto"}
+                  <Upload className="size-4" /> {actualImageUrl ? "Wijzig foto" : "Kies foto"}
                 </Button>
                 <div className="relative min-w-0 flex-1">
                   <Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -291,7 +288,7 @@ export function RecipeEditorDialog({
                     className="h-8 pl-8"
                   />
                 </div>
-                {(shownImageUrl || imageUrlText.trim()) && (
+                {(actualImageUrl || imageUrlText.trim()) && (
                   <Button type="button" variant="ghost" size="sm" onClick={clearImageSelection} disabled={pending}>
                     <X className="size-4" /> Verwijder
                   </Button>
