@@ -3,7 +3,13 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/supabase/server";
-import { RECIPE_IMAGE_BUCKET, RECIPE_IMAGE_MAX_BYTES, RECIPE_IMAGE_TYPES } from "@/lib/recipes/images";
+import {
+  isRemoteRecipeImagePath,
+  normalizeRecipeImageUrl,
+  RECIPE_IMAGE_BUCKET,
+  RECIPE_IMAGE_MAX_BYTES,
+  RECIPE_IMAGE_TYPES,
+} from "@/lib/recipes/images";
 import type { IngredientRow } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -44,6 +50,7 @@ function recipeFields(input: RecipeInput) {
 
 async function removeRecipeImageObject(db: SupabaseClient, path: string | null | undefined) {
   if (!path) return;
+  if (isRemoteRecipeImagePath(path)) return;
   await db.storage.from(RECIPE_IMAGE_BUCKET).remove([path]);
 }
 
@@ -111,6 +118,28 @@ export async function uploadRecipeImage(recipeId: string, formData: FormData): P
     await removeRecipeImageObject(db, path);
     throw updateError;
   }
+
+  await removeRecipeImageObject(db, recipe?.image_path);
+  revalidatePath("/recepten");
+}
+
+export async function setRecipeImageUrl(recipeId: string, imageUrl: string): Promise<void> {
+  const normalizedUrl = normalizeRecipeImageUrl(imageUrl);
+  if (!normalizedUrl) throw new Error("Plak een geldige afbeeldingslink.");
+
+  const db = getDb();
+  const { data: recipe, error: recipeError } = await db
+    .from("recipes")
+    .select("image_path")
+    .eq("id", recipeId)
+    .single();
+  if (recipeError) throw recipeError;
+
+  const { error } = await db
+    .from("recipes")
+    .update({ image_path: normalizedUrl, updated_at: new Date().toISOString() })
+    .eq("id", recipeId);
+  if (error) throw error;
 
   await removeRecipeImageObject(db, recipe?.image_path);
   revalidatePath("/recepten");

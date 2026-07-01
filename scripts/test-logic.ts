@@ -4,6 +4,7 @@ import { parseIngredientsText, toIngredientRows, serializeIngredient } from "../
 import { computeShoppingList, formatQuantity } from "../lib/planning/shopping";
 import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
+import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } from "../lib/recipes/images";
 
 let failures = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -13,6 +14,13 @@ function eq(label: string, got: unknown, want: unknown) {
   if (!ok) failures++;
   console.log(`${ok ? "✅" : "❌"} ${label}${ok ? "" : `\n     got=${g}\n    want=${w}`}`);
 }
+
+// ---- recipe image URLs ----
+process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+eq("storage image path -> public Supabase URL", getRecipeImageUrl("recipe-id/photo.jpg"), "https://example.supabase.co/storage/v1/object/public/recipe-images/recipe-id/photo.jpg");
+eq("remote image URL preserved", getRecipeImageUrl(" https://images.example.com/pasta.jpg?size=large "), "https://images.example.com/pasta.jpg?size=large");
+eq("remote image path detected", isRemoteRecipeImagePath("https://images.example.com/pasta.jpg"), true);
+eq("invalid image URL rejected", normalizeRecipeImageUrl("javascript:alert(1)"), null);
 
 // ---- ingredient parsing + normalization (authored for base_servings=2) ----
 const wortelText = `Robin 2 / Amber 1 stuk hamburger

@@ -17,9 +17,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Check, Beef, Image as ImageIcon, Upload, X } from "lucide-react";
+import { Plus, Check, Beef, Image as ImageIcon, Link2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getRecipeImageUrl, RECIPE_IMAGE_ACCEPT, RECIPE_IMAGE_MAX_BYTES, RECIPE_IMAGE_TYPES } from "@/lib/recipes/images";
+import {
+  getRecipeImageUrl,
+  isRemoteRecipeImagePath,
+  normalizeRecipeImageUrl,
+  RECIPE_IMAGE_ACCEPT,
+  RECIPE_IMAGE_MAX_BYTES,
+  RECIPE_IMAGE_TYPES,
+  RECIPE_IMAGE_URL_MAX_LENGTH,
+} from "@/lib/recipes/images";
 import type { RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import {
   IngredientListEditor,
@@ -28,7 +36,7 @@ import {
   rowsFromIngredients,
   type IngRow,
 } from "./ingredient-list-editor";
-import { clearRecipeImage, createRecipe, updateRecipe, uploadRecipeImage, type RecipeInput } from "./actions";
+import { clearRecipeImage, createRecipe, setRecipeImageUrl, updateRecipe, uploadRecipeImage, type RecipeInput } from "./actions";
 import { createTag } from "./tag-actions";
 
 export function RecipeEditorDialog({
@@ -55,6 +63,7 @@ export function RecipeEditorDialog({
   const [hasVleesje, setHasVleesje] = React.useState(false);
   const [imageFile, setImageFile] = React.useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = React.useState<string | null>(null);
+  const [imageUrlText, setImageUrlText] = React.useState("");
   const [imageRemoved, setImageRemoved] = React.useState(false);
   const imageInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -68,6 +77,7 @@ export function RecipeEditorDialog({
     setHasVleesje(recipe?.has_vleesje ?? false);
     setImageFile(null);
     setImagePreviewUrl(null);
+    setImageUrlText(isRemoteRecipeImagePath(recipe?.image_path) ? recipe?.image_path ?? "" : "");
     setImageRemoved(false);
     setNewTag("");
   }, [open, recipe]);
@@ -129,7 +139,21 @@ export function RecipeEditorDialog({
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImageFile(file);
     setImagePreviewUrl(URL.createObjectURL(file));
+    setImageUrlText("");
     setImageRemoved(false);
+  }
+
+  function changeImageUrlText(value: string) {
+    if (imageInputRef.current) imageInputRef.current.value = "";
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setImageUrlText(value);
+    if (value.trim()) {
+      setImageRemoved(false);
+    } else if (isRemoteRecipeImagePath(recipe?.image_path)) {
+      setImageRemoved(true);
+    }
   }
 
   function clearImageSelection() {
@@ -138,12 +162,21 @@ export function RecipeEditorDialog({
       selectImage(null);
       return;
     }
+    if (imageUrlText.trim()) {
+      changeImageUrlText("");
+      return;
+    }
     setImageRemoved(true);
   }
 
   async function onSave() {
     if (!title.trim()) {
       toast.error("Geef het recept een naam.");
+      return;
+    }
+    const remoteImageUrl = imageUrlText.trim() ? normalizeRecipeImageUrl(imageUrlText) : null;
+    if (imageUrlText.trim() && !remoteImageUrl) {
+      toast.error("Plak een geldige afbeeldingslink.");
       return;
     }
     const input: RecipeInput = {
@@ -164,6 +197,8 @@ export function RecipeEditorDialog({
         const formData = new FormData();
         formData.append("image", imageFile);
         await uploadRecipeImage(recipeId, formData);
+      } else if (remoteImageUrl) {
+        await setRecipeImageUrl(recipeId, remoteImageUrl);
       } else if (recipe && imageRemoved) {
         await clearRecipeImage(recipe.id);
       }
@@ -178,8 +213,10 @@ export function RecipeEditorDialog({
     }
   }
 
-  const existingImageUrl = imageRemoved ? null : getRecipeImageUrl(recipe?.image_path);
-  const shownImageUrl = imagePreviewUrl ?? existingImageUrl;
+  const remoteImageUrl = normalizeRecipeImageUrl(imageUrlText);
+  const hasImageUrlError = imageUrlText.trim().length > 0 && !remoteImageUrl;
+  const existingImageUrl = imageRemoved || imageUrlText.trim() ? null : getRecipeImageUrl(recipe?.image_path);
+  const shownImageUrl = imagePreviewUrl ?? remoteImageUrl ?? existingImageUrl;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -222,7 +259,7 @@ export function RecipeEditorDialog({
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2 p-3">
+              <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
                 <input
                   ref={imageInputRef}
                   type="file"
@@ -236,15 +273,31 @@ export function RecipeEditorDialog({
                   size="sm"
                   onClick={() => imageInputRef.current?.click()}
                   disabled={pending}
+                  className="shrink-0"
                 >
                   <Upload className="size-4" /> {shownImageUrl ? "Wijzig foto" : "Kies foto"}
                 </Button>
-                {shownImageUrl && (
+                <div className="relative min-w-0 flex-1">
+                  <Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="url"
+                    inputMode="url"
+                    value={imageUrlText}
+                    onChange={(e) => changeImageUrlText(e.target.value)}
+                    placeholder="Afbeeldingslink"
+                    maxLength={RECIPE_IMAGE_URL_MAX_LENGTH}
+                    aria-invalid={hasImageUrlError || undefined}
+                    disabled={pending}
+                    className="h-8 pl-8"
+                  />
+                </div>
+                {(shownImageUrl || imageUrlText.trim()) && (
                   <Button type="button" variant="ghost" size="sm" onClick={clearImageSelection} disabled={pending}>
                     <X className="size-4" /> Verwijder
                   </Button>
                 )}
               </div>
+              {hasImageUrlError && <p className="px-3 pb-3 text-xs text-destructive">Plak een geldige http(s)-link.</p>}
             </div>
           </div>
 
