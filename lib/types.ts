@@ -40,6 +40,7 @@ export type Recipe = {
   base_servings: number;
   method: string | null;
   notes: string | null;
+  image_path: string | null;
   cook_count: number;
   last_cooked_on: string | null;
   created_at: string;

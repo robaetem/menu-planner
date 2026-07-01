@@ -1,6 +1,7 @@
 # Data-Safe Deployment Notes
 
 This app stores real household data in Supabase. Current production data includes recipes, ingredients, planning rows, potjes, shopping data, and vleesjes.
+Recipe photos are stored in the Supabase Storage bucket `recipe-images`; recipe rows store only the object path.
 
 ## Before Deploying App Changes
 
@@ -12,7 +13,7 @@ This app stores real household data in Supabase. Current production data include
    ```bash
    corepack pnpm data:backup
    ```
-   Backups are written to `.backups/`, which is gitignored.
+   Database-row backups are written to `.backups/`, which is gitignored. Storage files should be exported from the `recipe-images` bucket before any storage-affecting work.
 3. Build locally:
    ```bash
    corepack pnpm build

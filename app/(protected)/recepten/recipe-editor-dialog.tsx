@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -16,8 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Check, Beef } from "lucide-react";
+import { Plus, Check, Beef, Image as ImageIcon, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getRecipeImageUrl, RECIPE_IMAGE_ACCEPT, RECIPE_IMAGE_MAX_BYTES, RECIPE_IMAGE_TYPES } from "@/lib/recipes/images";
 import type { RecipeTag, RecipeWithIngredients } from "@/lib/types";
 import {
   IngredientListEditor,
@@ -26,7 +28,7 @@ import {
   rowsFromIngredients,
   type IngRow,
 } from "./ingredient-list-editor";
-import { createRecipe, updateRecipe, type RecipeInput } from "./actions";
+import { clearRecipeImage, createRecipe, updateRecipe, uploadRecipeImage, type RecipeInput } from "./actions";
 import { createTag } from "./tag-actions";
 
 export function RecipeEditorDialog({
@@ -51,6 +53,10 @@ export function RecipeEditorDialog({
   const [method, setMethod] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [hasVleesje, setHasVleesje] = React.useState(false);
+  const [imageFile, setImageFile] = React.useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = React.useState<string | null>(null);
+  const [imageRemoved, setImageRemoved] = React.useState(false);
+  const imageInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -60,8 +66,17 @@ export function RecipeEditorDialog({
     setMethod(recipe?.method ?? "");
     setNotes(recipe?.notes ?? "");
     setHasVleesje(recipe?.has_vleesje ?? false);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setImageRemoved(false);
     setNewTag("");
   }, [open, recipe]);
+
+  React.useEffect(() => {
+    return () => {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    };
+  }, [imagePreviewUrl]);
 
   // Typing "[vleesje]" in the name is itself a template declaration.
   const titleHasToken = /\[vleesje\]/i.test(title);
@@ -94,6 +109,38 @@ export function RecipeEditorDialog({
     }
   }
 
+  function selectImage(file: File | null) {
+    if (!file) {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImageFile(null);
+      setImagePreviewUrl(null);
+      return;
+    }
+    if (!RECIPE_IMAGE_TYPES[file.type]) {
+      if (imageInputRef.current) imageInputRef.current.value = "";
+      toast.error("Gebruik een jpg, png, webp of gif.");
+      return;
+    }
+    if (file.size > RECIPE_IMAGE_MAX_BYTES) {
+      if (imageInputRef.current) imageInputRef.current.value = "";
+      toast.error("Foto is groter dan 5 MB.");
+      return;
+    }
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(file);
+    setImagePreviewUrl(URL.createObjectURL(file));
+    setImageRemoved(false);
+  }
+
+  function clearImageSelection() {
+    if (imageInputRef.current) imageInputRef.current.value = "";
+    if (imageFile) {
+      selectImage(null);
+      return;
+    }
+    setImageRemoved(true);
+  }
+
   async function onSave() {
     if (!title.trim()) {
       toast.error("Geef het recept een naam.");
@@ -109,13 +156,18 @@ export function RecipeEditorDialog({
     };
     setPending(true);
     try {
+      const recipeId = recipe ? recipe.id : await createRecipe(input);
       if (recipe) {
         await updateRecipe(recipe.id, input);
-        toast.success("Recept bijgewerkt");
-      } else {
-        await createRecipe(input);
-        toast.success("Recept toegevoegd");
       }
+      if (imageFile) {
+        const formData = new FormData();
+        formData.append("image", imageFile);
+        await uploadRecipeImage(recipeId, formData);
+      } else if (recipe && imageRemoved) {
+        await clearRecipeImage(recipe.id);
+      }
+      toast.success(recipe ? "Recept bijgewerkt" : "Recept toegevoegd");
       router.refresh();
       onOpenChange(false);
     } catch (e) {
@@ -125,6 +177,9 @@ export function RecipeEditorDialog({
       setPending(false);
     }
   }
+
+  const existingImageUrl = imageRemoved ? null : getRecipeImageUrl(recipe?.image_path);
+  const shownImageUrl = imagePreviewUrl ?? existingImageUrl;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -146,6 +201,51 @@ export function RecipeEditorDialog({
               placeholder="bv. Wraps met ratatouille en ei"
               autoFocus
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Foto</Label>
+            <div className="overflow-hidden rounded-xl border bg-card">
+              <div className="relative aspect-[16/9] bg-muted">
+                {shownImageUrl ? (
+                  <Image
+                    src={shownImageUrl}
+                    alt={title || recipe?.title || "Receptfoto"}
+                    fill
+                    sizes="(min-width: 640px) 640px, 100vw"
+                    unoptimized
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-muted-foreground">
+                    <ImageIcon className="size-10" />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 p-3">
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept={RECIPE_IMAGE_ACCEPT}
+                  className="sr-only"
+                  onChange={(e) => selectImage(e.target.files?.[0] ?? null)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={pending}
+                >
+                  <Upload className="size-4" /> {shownImageUrl ? "Wijzig foto" : "Kies foto"}
+                </Button>
+                {shownImageUrl && (
+                  <Button type="button" variant="ghost" size="sm" onClick={clearImageSelection} disabled={pending}>
+                    <X className="size-4" /> Verwijder
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
