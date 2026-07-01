@@ -36,6 +36,12 @@ eq("bonen normalized 0.75", ballRows[1].amount, 0.75);
 eq("tomatenstukjes fixed not divided", { a: ballRows[2].amount, s: ballRows[2].scaling }, { a: 1, s: "fixed" });
 eq("aardappelen balletjes 75", ballRows[3].amount, 75);
 
+const spoonText = `2 koffielepels paprikapoeder
+2 theelepels zout`;
+const spoonRows = toIngredientRows(parseIngredientsText(spoonText), 2).map((r) => ({ ...r, recipe_id: "s", id: r.name }));
+eq("koffielepels parse canonical", { a: spoonRows[0].amount, u: spoonRows[0].unit }, { a: 1, u: "koffielepel" });
+eq("theelepels parse canonical", { a: spoonRows[1].amount, u: spoonRows[1].unit }, { a: 1, u: "theelepel" });
+
 // round-trip serialize back to typed lines (base 2)
 eq("serialize wortels round-trip", serializeIngredient(wortelRows[1] as any, 2), "350 g wortels");
 eq("serialize gehakt range round-trip", serializeIngredient(ballRows[0] as any, 2), "450-500 g gehakt");
@@ -63,10 +69,12 @@ const ingredientsByRecipe: Record<string, any[]> = {
     sort: 99,
   }],
   b: ballRows,
+  s: spoonRows,
 };
 const days: any[] = [
   { id: "d1", meals: [{ recipe_id: "w", recipe: { id: "w", title: "Wortelpuree met hamburgers" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2, from_freezer: false }] },
   { id: "d2", meals: [{ recipe_id: "b", recipe: { id: "b", title: "Balletjes in tomatensaus" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2, from_freezer: false }] },
+  { id: "d-spoon", meals: [{ recipe_id: "s", recipe: { id: "s", title: "Lepeltest" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 0, from_freezer: false }] },
   { id: "d3", meals: [{ recipe_id: null, recipe: null, raw_text: "Amber en Robin Potje", diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 0, from_freezer: true }] },
 ];
 const res = computeShoppingList(days, ingredientsByRecipe);
@@ -77,9 +85,11 @@ eq("hamburger 6 stuk (Robin>Amber, potjes add one extra round)", byKey["hamburge
 eq("gehakt 1000 g (amount_max)", byKey["gehakt|gram"], "1000 g");
 eq("bonen 3 blik", byKey["bonen in tomatensaus|blik"], "3 blik");
 eq("tomatenstukjes 1 blik (fixed)", byKey["tomatenstukjes|blik"], "1 blik");
+eq("koffielepel summed and pluralized", byKey["paprikapoeder|koffielepel"], "2 koffielepels");
+eq("theelepel summed and pluralized", byKey["zout|theelepel"], "2 theelepels");
 eq("excluded ingredient ignored", byKey["servet|stuk"], undefined);
 eq("from_freezer ignored", res.mealsFromFreezer, 1);
-eq("meals counted", res.mealsCounted, 2);
+eq("meals counted", res.mealsCounted, 3);
 
 // ---- ranker ----
 const recipes: any[] = [

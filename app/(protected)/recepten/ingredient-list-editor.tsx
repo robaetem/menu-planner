@@ -10,7 +10,7 @@ import type { Ingredient, IngredientRow } from "@/lib/types";
 // normalized by this on save (so a single-person meal scales to one serving).
 const HOUSEHOLD = 2;
 
-export const UNIT_OPTIONS = ["stuk", "gram", "dl", "cl", "ml"];
+export const UNIT_OPTIONS = ["stuk", "gram", "dl", "cl", "ml", "koffielepel", "theelepel"];
 
 export type IngRow = {
   key: string;
@@ -42,6 +42,8 @@ function mapUnit(u: string): string {
   if (v === "g" || v === "gr" || v === "gram" || v === "grammen") return "gram";
   if (UNIT_OPTIONS.includes(v)) return v;
   if (v === "stuks" || v === "st") return "stuk";
+  if (v === "koffielepels" || v === "kl") return "koffielepel";
+  if (v === "theelepels" || v === "tl") return "theelepel";
   return "stuk"; // legacy counts (blik, teen, rol, fles, bos, pak, …) → stuk
 }
 
@@ -127,7 +129,7 @@ export function IngredientListEditor({
             <AmountField label="Amber" value={r.amber} onChange={(v) => update(r.key, { amber: v })} />
             <AmountField label="Robin" value={r.robin} onChange={(v) => update(r.key, { robin: v })} />
             <Select value={r.unit} onValueChange={(v) => update(r.key, { unit: String(v) })}>
-              <SelectTrigger size="sm" className="w-[5.5rem]">
+              <SelectTrigger size="sm" className="w-[8.25rem]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

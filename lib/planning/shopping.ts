@@ -33,6 +33,10 @@ export type ShoppingResult = {
 };
 
 const COUNTABLE = new Set(["stuk", "blik", "teen", "bos", "pak", "zak", "snee", "plak", "pot", "bol"]);
+const UNIT_PLURAL: Record<string, string> = {
+  koffielepel: "koffielepels",
+  theelepel: "theelepels",
+};
 
 // Reconcile unit spellings so the same ingredient merges regardless of which
 // write path produced it (the editor uses "gram"/"stuk"/…, older data may use
@@ -43,10 +47,18 @@ const UNIT_CANON: Record<string, string> = {
   l: "l", liter: "l", liters: "l",
   ml: "ml", cl: "cl", dl: "dl",
   stuk: "stuk", stuks: "stuk", st: "stuk",
+  koffielepel: "koffielepel", koffielepels: "koffielepel", kl: "koffielepel",
+  theelepel: "theelepel", theelepels: "theelepel", tl: "theelepel",
 };
 export function normalizeUnit(unit: string): string {
   const v = (unit || "").trim().toLowerCase();
   return UNIT_CANON[v] ?? v;
+}
+
+function displayUnit(unit: string, amount: number): string {
+  const normalized = normalizeUnit(unit);
+  if (normalized in UNIT_PLURAL) return amount === 1 ? normalized : UNIT_PLURAL[normalized];
+  return unit;
 }
 
 export function lineKey(name: string, unit: string): string {
@@ -138,7 +150,7 @@ export function formatQuantity(line: Pick<ShoppingLine, "total" | "unit" | "hasN
   if (COUNTABLE.has(normalizeUnit(line.unit))) n = Math.ceil(n - 1e-9);
   else n = Math.round(n * 10) / 10;
   const s = Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
-  return line.unit ? `${s} ${line.unit}` : s;
+  return line.unit ? `${s} ${displayUnit(line.unit, n)}` : s;
 }
 
 export function formatProvenanceAmount(p: ShoppingProvenance, unit: string): string {
