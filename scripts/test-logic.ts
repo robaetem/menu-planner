@@ -1,6 +1,7 @@
 /* Sanity checks for the core logic against the design worked-example.
    Run: corepack pnpm dlx tsx scripts/test-logic.ts  */
 import { parseIngredientsText, toIngredientRows, serializeIngredient } from "../lib/recipes/ingredient-parser";
+import { serializePlannedIngredient } from "../lib/planning/ingredient-quantity";
 import { computeShoppingList, formatQuantity } from "../lib/planning/shopping";
 import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
@@ -55,6 +56,22 @@ eq("serialize wortels round-trip", serializeIngredient(wortelRows[1] as any, 2),
 eq("serialize gehakt range round-trip", serializeIngredient(ballRows[0] as any, 2), "450-500 g gehakt");
 eq("serialize hamburger per_person", serializeIngredient(wortelRows[0] as any, 2), "Robin 2 / Amber 1 stuk hamburger");
 eq("serialize fixed", serializeIngredient(ballRows[2] as any, 2), "vast: 1 blik tomatenstukjes");
+
+// planned details show the total amount to cook (diners + extra potjes)
+const bothPlusTwo = { diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2 };
+const amberPlusTwo = { diner_count: 1, diner_keys: ["amber"], freezer_servings: 2 };
+const scampiRow = {
+  ...toIngredientRows(parseIngredientsText("125 gram Gepelde scampi's"), 2)[0],
+  unit: "gram",
+  recipe_id: "p",
+  id: "scampi",
+};
+eq("planned scampi doubles for 2 diners + 2 potjes", serializePlannedIngredient(scampiRow as any, bothPlusTwo), "250 gram Gepelde scampi's");
+eq("planned per-serving total", serializePlannedIngredient(wortelRows[1] as any, bothPlusTwo), "700 g wortels");
+eq("planned per-person total", serializePlannedIngredient(wortelRows[0] as any, bothPlusTwo), "6 stuk hamburger");
+eq("planned single-diner potjes", serializePlannedIngredient(wortelRows[0] as any, amberPlusTwo), "3 stuk hamburger");
+eq("planned range total", serializePlannedIngredient(ballRows[0] as any, bothPlusTwo), "900-1000 g gehakt");
+eq("planned fixed amount unchanged", serializePlannedIngredient(ballRows[2] as any, bothPlusTwo), "vast: 1 blik tomatenstukjes");
 
 // ---- meal line parsing ----
 eq("parse '+ 2 potjes'", parseMealLine("Quiche lorrain met bloemkool + 2 potjes"), { cook: null, freezer_servings: 2, title: "Quiche lorrain met bloemkool" });

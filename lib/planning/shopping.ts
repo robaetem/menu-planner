@@ -1,4 +1,5 @@
 import type { Ingredient, PlanDayWithMeals } from "@/lib/types";
+import { plannedIngredientQuantity } from "@/lib/planning/ingredient-quantity";
 
 // Aggregate every planned meal's ingredients into one shopping list.
 //
@@ -106,29 +107,10 @@ export function computeShoppingList(
       }
       const ings = ingredientsByRecipe[meal.recipe_id] || [];
       mealsCounted++;
-      const dinerCount = meal.diner_count || meal.diner_keys?.length || 0;
-      const factor = dinerCount + (meal.freezer_servings || 0);
-      // Potjes add extra rounds of the diners present: 2 diners + 2 potjes = 2 rounds.
-      const potjeRounds = dinerCount > 0 ? factor / dinerCount : 1;
       for (const ig of ings) {
         if (ig.include_in_shopping === false) continue;
-        const a = ig.amount_max ?? ig.amount;
-        if (ig.scaling === "per_serving") {
-          add(ig.name, ig.unit, a != null ? a * factor : null, ig.is_fresh, label);
-        } else if (ig.scaling === "per_person") {
-          let sum = 0;
-          let any = false;
-          for (const k of meal.diner_keys || []) {
-            const v = ig.amounts_per_person?.[k];
-            if (v != null) {
-              sum += Number(v);
-              any = true;
-            }
-          }
-          add(ig.name, ig.unit, any ? sum * potjeRounds : null, ig.is_fresh, label);
-        } else {
-          add(ig.name, ig.unit, a, ig.is_fresh, label);
-        }
+        const quantity = plannedIngredientQuantity(ig, meal);
+        add(ig.name, ig.unit, quantity.amount_max ?? quantity.amount, ig.is_fresh, label);
       }
     }
   }

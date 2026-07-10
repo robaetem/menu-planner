@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { serializeIngredient } from "@/lib/recipes/ingredient-parser";
+import { serializePlannedIngredient } from "@/lib/planning/ingredient-quantity";
 import { assigneeLabel, isVleesjeTemplate, resolveTitle } from "./config";
 import type { Diner, PlanMealWithRecipe, RecipeWithIngredients } from "@/lib/types";
 
@@ -129,14 +129,9 @@ export function MealDetailDialog({
                     {recipe.ingredients.map((ig) => (
                       <li key={ig.id} className="flex items-center justify-between gap-3 px-3.5 py-2 text-sm">
                         <span className="flex items-center gap-2">
-                          {serializeIngredient(ig, recipe.base_servings).replace(/^vast:\s*/, "")}
+                          {serializePlannedIngredient(ig, meal).replace(/^vast:\s*/, "")}
                           {ig.is_fresh && <Leaf className="size-3.5 text-primary" />}
                         </span>
-                        {ig.scaling === "per_person" && (
-                          <Badge variant="outline" className="text-violet-600 dark:text-violet-400">
-                            per persoon
-                          </Badge>
-                        )}
                       </li>
                     ))}
                   </ul>
