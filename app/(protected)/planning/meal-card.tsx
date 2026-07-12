@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Diner, PlanMealWithRecipe } from "@/lib/types";
-import { deleteMeal, setMealPotjes } from "./actions";
+import { deleteMeal, setMealFreezer } from "./actions";
 import { isVleesjeTemplate, vleesjeSummary } from "./config";
 
 function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
@@ -94,7 +94,13 @@ export function MealCard({
           </span>
         ))}
         {!potje && (
-          <PotjesControl value={meal.freezer_servings} onChange={(n) => run(() => setMealPotjes(meal.id, n))} />
+          <PotjesControl
+            robin={meal.freezer_robin}
+            amber={meal.freezer_amber}
+            robinLabel={diners.find((d) => d.key === "robin")?.label ?? "Robin"}
+            amberLabel={diners.find((d) => d.key === "amber")?.label ?? "Amber"}
+            onChange={(r, a) => run(() => setMealFreezer(meal.id, r, a))}
+          />
         )}
       </div>
     </div>
@@ -156,8 +162,22 @@ function VleesjeChip({ chosen, onPick }: { chosen: string; onPick: () => void })
   );
 }
 
-function PotjesControl({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  const n = value || 0;
+function PotjesControl({
+  robin,
+  amber,
+  robinLabel,
+  amberLabel,
+  onChange,
+}: {
+  robin: number;
+  amber: number;
+  robinLabel: string;
+  amberLabel: string;
+  onChange: (robin: number, amber: number) => void;
+}) {
+  const r = robin || 0;
+  const a = amber || 0;
+  const total = r + a;
   return (
     <Popover>
       <PopoverTrigger
@@ -166,7 +186,7 @@ function PotjesControl({ value, onChange }: { value: number; onChange: (n: numbe
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
-              n > 0
+              total > 0
                 ? "border-foreground/15 bg-background/60"
                 : "border-dashed border-foreground/25 text-muted-foreground hover:text-foreground",
             )}
@@ -174,20 +194,44 @@ function PotjesControl({ value, onChange }: { value: number; onChange: (n: numbe
         }
       >
         <Snowflake className="size-3" />
-        {n > 0 ? `+${n} ${n === 1 ? "potje" : "potjes"}` : "potje"}
+        {total > 0 ? `+${total} ${total === 1 ? "potje" : "potjes"}` : "potje"}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-2.5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon-sm" onClick={() => onChange(Math.max(0, n - 1))} disabled={n <= 0} aria-label="Minder">
-            <Minus className="size-3.5" />
-          </Button>
-          <span className="min-w-8 text-center text-sm font-medium tabular-nums">{n}</span>
-          <Button variant="outline" size="icon-sm" onClick={() => onChange(n + 1)} aria-label="Meer">
-            <Plus className="size-3.5" />
-          </Button>
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+          <PotjeRow label={robinLabel} value={r} onChange={(n) => onChange(n, a)} />
+          <PotjeRow label={amberLabel} value={a} onChange={(n) => onChange(r, n)} />
         </div>
-        <p className="mt-1.5 text-center text-xs text-muted-foreground">extra potjes invriezen</p>
+        <p className="mt-2 text-center text-xs text-muted-foreground">extra potjes invriezen</p>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** One person's stepper row inside the potjes popover. */
+function PotjeRow({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+  return (
+    <>
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => onChange(Math.max(0, value - 1))}
+          disabled={value <= 0}
+          aria-label={`Minder potjes voor ${label}`}
+        >
+          <Minus className="size-3.5" />
+        </Button>
+        <span className="min-w-8 text-center text-sm font-medium tabular-nums">{value}</span>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => onChange(value + 1)}
+          aria-label={`Meer potjes voor ${label}`}
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      </div>
+    </>
   );
 }

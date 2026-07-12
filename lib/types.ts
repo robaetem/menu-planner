@@ -127,7 +127,10 @@ export type PlanMeal = {
   cook: string | null;
   diner_count: number;
   diner_keys: string[];
-  freezer_servings: number;
+  /** Extra potjes to cook & freeze, portioned per person (a Robin potje and an
+   *  Amber potje differ in size for per_person ingredients). */
+  freezer_robin: number;
+  freezer_amber: number;
   from_freezer: boolean; // true = "Potje diepvries" (blue, eat from stock)
   template_vleesjes: TemplateVleesje[];
   note: string | null;

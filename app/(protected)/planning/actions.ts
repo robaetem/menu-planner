@@ -90,7 +90,6 @@ export async function addPotjeFromInventory(
     raw_text: potje.name,
     diner_keys: d.diner_keys,
     diner_count: d.diner_count,
-    freezer_servings: 0,
     sort: await nextSort(db, dayId),
   });
   if (error) throw error;
@@ -122,7 +121,6 @@ export async function assignRecipe(dayDate: string, assignee: Assignee, recipeId
     raw_text: recipe?.title ?? "",
     diner_keys: d.diner_keys,
     diner_count: d.diner_count,
-    freezer_servings: 0,
     sort: await nextSort(db, dayId),
   });
   if (error) throw error;
@@ -241,10 +239,14 @@ export async function setMealVleesjes(mealId: string, vleesjes: TemplateVleesje[
   revalidatePath("/vleesjes");
 }
 
-export async function setMealPotjes(mealId: string, n: number): Promise<void> {
+/** Set how many extra potjes to cook & freeze, per person (Robin / Amber). */
+export async function setMealFreezer(mealId: string, robin: number, amber: number): Promise<void> {
   const db = getDb();
-  const value = Math.max(0, Math.min(20, Math.floor(n) || 0));
-  const { error } = await db.from("plan_meals").update({ freezer_servings: value }).eq("id", mealId);
+  const clamp = (n: number) => Math.max(0, Math.min(20, Math.floor(n) || 0));
+  const { error } = await db
+    .from("plan_meals")
+    .update({ freezer_robin: clamp(robin), freezer_amber: clamp(amber) })
+    .eq("id", mealId);
   if (error) throw error;
   revalidatePath("/planning");
 }

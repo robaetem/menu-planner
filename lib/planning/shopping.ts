@@ -3,12 +3,11 @@ import { plannedIngredientQuantity } from "@/lib/planning/ingredient-quantity";
 
 // Aggregate every planned meal's ingredients into one shopping list.
 //
-//   servings_factor(meal) = diner_count + freezer_servings   (potjes = cook extra)
+//   servings_factor(meal) = diner_count + freezer_robin + freezer_amber
 //   per_serving -> amount(or amount_max) * servings_factor
-//   per_person  -> sum of amounts_per_person over the diners present, scaled by
-//                  servings_factor / diner_count. A potje is an extra round of the
-//                  diners present, so "+2 potjes" with 2 diners = one extra Robin +
-//                  one extra Amber portion.
+//   per_person  -> sum of amounts_per_person over the diners present, PLUS each
+//                  extra potje sized for the person it's cooked for (a Robin potje
+//                  adds Robin's portion, an Amber potje adds Amber's).
 //   fixed       -> amount(or amount_max) once per meal
 //   from_freezer / unlinked meals contribute nothing.
 // Lines merge by (lower(name), lower(unit)); amount_max ("800-1000 g") is used so

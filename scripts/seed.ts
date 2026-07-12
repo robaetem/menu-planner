@@ -196,7 +196,10 @@ async function main() {
         raw_text: isPotje ? m.potje! : m.recipe ?? "",
         diner_keys: dn.keys,
         diner_count: dn.count,
-        freezer_servings: m.potjes ?? 0,
+        // "+N potjes" -> split per person (odd count -> extra on Robin), matching
+        // the per-person freezer model (migration 0011).
+        freezer_robin: Math.ceil((m.potjes ?? 0) / 2),
+        freezer_amber: Math.floor((m.potjes ?? 0) / 2),
         sort: sort++,
       });
       if (me) throw me;

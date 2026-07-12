@@ -35,10 +35,22 @@ export function MealDetailDialog({
   const title = isTemplate ? resolveTitle(baseTitle, meal.template_vleesjes) : baseTitle;
   const vleesjes = meal.template_vleesjes ?? [];
   const who = meal.assignee;
+  const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
+  const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
   const whoLabel =
     who === "both"
-      ? `${diners.find((d) => d.key === "robin")?.label ?? "Robin"} & ${diners.find((d) => d.key === "amber")?.label ?? "Amber"}`
+      ? `${robinLabel} & ${amberLabel}`
       : diners.find((d) => d.key === who)?.label ?? assigneeLabel(who);
+
+  const freezerRobin = meal.freezer_robin || 0;
+  const freezerAmber = meal.freezer_amber || 0;
+  const freezerTotal = freezerRobin + freezerAmber;
+  const freezerParts = [
+    freezerRobin > 0 ? `${freezerRobin} ${robinLabel}` : null,
+    freezerAmber > 0 ? `${freezerAmber} ${amberLabel}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -55,10 +67,10 @@ export function MealDetailDialog({
                 <Snowflake className="size-4" /> uit de diepvries
               </span>
             )}
-            {!meal.from_freezer && meal.freezer_servings > 0 && (
+            {!meal.from_freezer && freezerTotal > 0 && (
               <span className="inline-flex items-center gap-1.5">
-                <Snowflake className="size-4" /> +{meal.freezer_servings}{" "}
-                {meal.freezer_servings === 1 ? "potje" : "potjes"} invriezen
+                <Snowflake className="size-4" /> +{freezerTotal}{" "}
+                {freezerTotal === 1 ? "potje" : "potjes"} invriezen ({freezerParts})
               </span>
             )}
           </div>

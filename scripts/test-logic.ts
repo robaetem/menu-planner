@@ -57,9 +57,10 @@ eq("serialize gehakt range round-trip", serializeIngredient(ballRows[0] as any, 
 eq("serialize hamburger per_person", serializeIngredient(wortelRows[0] as any, 2), "Robin 2 / Amber 1 stuk hamburger");
 eq("serialize fixed", serializeIngredient(ballRows[2] as any, 2), "vast: 1 blik tomatenstukjes");
 
-// planned details show the total amount to cook (diners + extra potjes)
-const bothPlusTwo = { diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2 };
-const amberPlusTwo = { diner_count: 1, diner_keys: ["amber"], freezer_servings: 2 };
+// planned details show the total amount to cook (diners + extra potjes, each
+// potje sized for the person it's cooked for)
+const bothPlusTwo = { diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1 };
+const amberPlusTwo = { diner_count: 1, diner_keys: ["amber"], freezer_robin: 1, freezer_amber: 1 };
 const scampiRow = {
   ...toIngredientRows(parseIngredientsText("125 gram Gepelde scampi's"), 2)[0],
   unit: "gram",
@@ -69,7 +70,8 @@ const scampiRow = {
 eq("planned scampi doubles for 2 diners + 2 potjes", serializePlannedIngredient(scampiRow as any, bothPlusTwo), "250 gram Gepelde scampi's");
 eq("planned per-serving total", serializePlannedIngredient(wortelRows[1] as any, bothPlusTwo), "700 g wortels");
 eq("planned per-person total", serializePlannedIngredient(wortelRows[0] as any, bothPlusTwo), "6 stuk hamburger");
-eq("planned single-diner potjes", serializePlannedIngredient(wortelRows[0] as any, amberPlusTwo), "3 stuk hamburger");
+// Amber eats (1) + a Robin potje (2) + an Amber potje (1) = 4
+eq("planned single-diner + per-person potjes", serializePlannedIngredient(wortelRows[0] as any, amberPlusTwo), "4 stuk hamburger");
 eq("planned range total", serializePlannedIngredient(ballRows[0] as any, bothPlusTwo), "900-1000 g gehakt");
 eq("planned fixed amount unchanged", serializePlannedIngredient(ballRows[2] as any, bothPlusTwo), "vast: 1 blik tomatenstukjes");
 
@@ -97,10 +99,10 @@ const ingredientsByRecipe: Record<string, any[]> = {
   s: spoonRows,
 };
 const days: any[] = [
-  { id: "d1", meals: [{ recipe_id: "w", recipe: { id: "w", title: "Wortelpuree met hamburgers" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2, from_freezer: false }] },
-  { id: "d2", meals: [{ recipe_id: "b", recipe: { id: "b", title: "Balletjes in tomatensaus" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 2, from_freezer: false }] },
-  { id: "d-spoon", meals: [{ recipe_id: "s", recipe: { id: "s", title: "Lepeltest" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 0, from_freezer: false }] },
-  { id: "d3", meals: [{ recipe_id: null, recipe: null, raw_text: "Amber en Robin Potje", diner_count: 2, diner_keys: ["robin", "amber"], freezer_servings: 0, from_freezer: true }] },
+  { id: "d1", meals: [{ recipe_id: "w", recipe: { id: "w", title: "Wortelpuree met hamburgers" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
+  { id: "d2", meals: [{ recipe_id: "b", recipe: { id: "b", title: "Balletjes in tomatensaus" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
+  { id: "d-spoon", meals: [{ recipe_id: "s", recipe: { id: "s", title: "Lepeltest" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: false }] },
+  { id: "d3", meals: [{ recipe_id: null, recipe: null, raw_text: "Amber en Robin Potje", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: true }] },
 ];
 const res = computeShoppingList(days, ingredientsByRecipe);
 const byKey = Object.fromEntries(res.all.map((l) => [l.key, formatQuantity(l)]));
