@@ -140,10 +140,11 @@ export function PlanningView({
       <AlertDialog open={confirmShop} onOpenChange={(o) => !generating && setConfirmShop(o)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Boodschappenlijstje maken?</AlertDialogTitle>
+            <AlertDialogTitle>Boodschappen bijwerken?</AlertDialogTitle>
             <AlertDialogDescription>
-              De ingrediënten van {count} {count === 1 ? "geselecteerde dag" : "geselecteerde dagen"} worden
-              ingedeeld per categorie. <strong>Je huidige boodschappenlijstje wordt overschreven.</strong>
+              De ingrediënten van {count} {count === 1 ? "geselecteerde dag" : "geselecteerde dagen"} worden per
+              categorie ingedeeld. Alleen <strong>‘Uit je planning’ wordt vervangen.</strong> Alles onder
+              <strong> ‘Zelf toegevoegd’ blijft staan.</strong>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -155,7 +156,7 @@ export function PlanningView({
               }}
               disabled={generating}
             >
-              {generating ? "Maken…" : "Overschrijven"}
+              {generating ? "Bijwerken…" : "Bijwerken"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -198,7 +199,7 @@ function ShopButton({ count, onClick }: { count: number; onClick: () => void }) 
   if (count > 0) {
     return (
       <Button onClick={onClick} className="shrink-0">
-        <ShoppingCart className="size-4" /> Maak boodschappenlijstje ({count})
+        <ShoppingCart className="size-4" /> Boodschappen bijwerken ({count})
       </Button>
     );
   }
@@ -207,7 +208,7 @@ function ShopButton({ count, onClick }: { count: number; onClick: () => void }) 
       <Tooltip>
         <TooltipTrigger render={<span className="inline-block shrink-0" />}>
           <Button disabled className="pointer-events-none shrink-0">
-            <ShoppingCart className="size-4" /> Maak boodschappenlijstje
+            <ShoppingCart className="size-4" /> Boodschappen bijwerken
           </Button>
         </TooltipTrigger>
         <TooltipContent>Selecteer minstens 1 dag</TooltipContent>

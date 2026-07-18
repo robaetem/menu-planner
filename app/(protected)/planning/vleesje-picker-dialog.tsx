@@ -247,7 +247,7 @@ export function VleesjePickerDialog({
               </Button>
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              Komt op je boodschappenlijstje bij “Maak boodschappenlijstje”.
+              Komt onder “Uit je planning” bij “Boodschappen bijwerken”.
             </p>
           </section>
         </div>

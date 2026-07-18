@@ -4,21 +4,22 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/supabase/server";
 import { computeShoppingList, formatQuantity } from "@/lib/planning/shopping";
 import { buildShoppingDoc, type ShoppingGroup } from "@/lib/shopping/build-doc";
+import { shoppingDocPatch, type ShoppingSection } from "@/lib/shopping/document-sections";
 import { resolveCategories, FALLBACK_CATEGORY } from "@/lib/shopping/resolve-categories";
 import type { Ingredient, PlanDayWithMeals, TemplateVleesje } from "@/lib/types";
 
-/** Persist the editable boodschappenlijstje document (TipTap JSON). */
-export async function saveShoppingDoc(content: unknown): Promise<void> {
+/** Persist one editable boodschappenlijstje section (TipTap JSON). The manual
+ * and planner-generated documents live in separate columns so neither autosave
+ * nor regeneration can overwrite the other section. */
+export async function saveShoppingDoc(section: ShoppingSection, content: unknown): Promise<void> {
   const db = getDb();
   const { data: existing } = await db.from("shopping_doc").select("id").limit(1).maybeSingle();
+  const patch = shoppingDocPatch(section, content);
   if (existing) {
-    const { error } = await db
-      .from("shopping_doc")
-      .update({ content, updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
+    const { error } = await db.from("shopping_doc").update(patch).eq("id", existing.id);
     if (error) throw error;
   } else {
-    const { error } = await db.from("shopping_doc").insert({ content });
+    const { error } = await db.from("shopping_doc").insert(patch);
     if (error) throw error;
   }
   // No revalidatePath here: autosave must NOT refresh the route, or the saved
@@ -26,8 +27,9 @@ export async function saveShoppingDoc(content: unknown): Promise<void> {
   // editor owns the document; the generate flow reads fresh on navigation.
 }
 
-/** Aggregate the selected days into a categorised boodschappenlijstje and
- *  OVERWRITE the document. Pulls recipe ingredients + "te kopen" template
+/** Aggregate the selected days into a categorised planner section and replace
+ *  only that section. The permanent manual document is never touched. Pulls
+ *  recipe ingredients + "te kopen" template
  *  vleesjes, asks the AI to categorise any new ingredient names, groups by the
  *  user's categories, and writes a fresh checkbox list. */
 export async function generateShoppingList(dates: string[]): Promise<void> {
@@ -113,8 +115,8 @@ export async function generateShoppingList(dates: string[]): Promise<void> {
     if (!emitted.has(cat) && lines.length) groups.push({ category: cat, lines: dedupe(lines) });
   }
 
-  const doc = buildShoppingDoc(groups);
-  await saveShoppingDoc(doc);
+  const doc = buildShoppingDoc(groups, "Uit je planning");
+  await saveShoppingDoc("generated", doc);
   // Safe here (runs from Planning, not the editor): invalidate so the freshly
   // generated list shows when we navigate to the boodschappenlijstje.
   revalidatePath("/boodschappenlijstje");

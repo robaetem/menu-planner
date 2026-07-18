@@ -6,6 +6,7 @@ import { computeShoppingList, formatQuantity } from "../lib/planning/shopping";
 import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
 import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } from "../lib/recipes/images";
+import { shoppingDocPatch } from "../lib/shopping/document-sections";
 
 let failures = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -22,6 +23,19 @@ eq("storage image path -> public Supabase URL", getRecipeImageUrl("recipe-id/pho
 eq("remote image URL preserved", getRecipeImageUrl(" https://images.example.com/pasta.jpg?size=large "), "https://images.example.com/pasta.jpg?size=large");
 eq("remote image path detected", isRemoteRecipeImagePath("https://images.example.com/pasta.jpg"), true);
 eq("invalid image URL rejected", normalizeRecipeImageUrl("javascript:alert(1)"), null);
+
+// ---- shopping document section isolation ----
+const shoppingTimestamp = "2026-07-18T00:00:00.000Z";
+const manualDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "koffie" }] }] };
+const generatedDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "wortels" }] }] };
+eq("manual shopping save only patches permanent content", shoppingDocPatch("manual", manualDoc, shoppingTimestamp), {
+  content: manualDoc,
+  updated_at: shoppingTimestamp,
+});
+eq("generated shopping save cannot patch manual content", shoppingDocPatch("generated", generatedDoc, shoppingTimestamp), {
+  generated_content: generatedDoc,
+  updated_at: shoppingTimestamp,
+});
 
 // ---- ingredient parsing + normalization (authored for base_servings=2) ----
 const wortelText = `Robin 2 / Amber 1 stuk hamburger

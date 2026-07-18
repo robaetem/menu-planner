@@ -29,9 +29,11 @@ const EMPTY_DOC: DocJSON = { type: "doc", content: [{ type: "paragraph" }] };
 export function ShoppingEditor({
   content,
   onChange,
+  minHeightClassName = "min-h-[55vh]",
 }: {
   content: DocJSON | null;
   onChange: (doc: DocJSON) => void;
+  minHeightClassName?: string;
 }) {
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -48,7 +50,7 @@ export function ShoppingEditor({
     content: content ?? EMPTY_DOC,
     editorProps: {
       attributes: {
-        class: "tiptap max-w-none min-h-[55vh] focus:outline-none px-1 py-2 text-sm",
+        class: cn("tiptap max-w-none focus:outline-none px-1 py-2 text-sm", minHeightClassName),
       },
     },
     onUpdate({ editor }) {
@@ -60,7 +62,7 @@ export function ShoppingEditor({
   // The editor is UNCONTROLLED after mount: it owns the document and autosaves.
   // We deliberately do NOT sync the `content` prop back in on every render — that
   // fought with live typing (a saved value echoing back reset the doc mid-edit).
-  // Genuinely new content (after "Maak boodschappenlijstje") arrives via a fresh
+  // Genuinely new content (after "Boodschappen bijwerken") arrives via a fresh
   // navigation, which remounts this component with the new initial content.
 
   React.useEffect(() => {
@@ -70,7 +72,7 @@ export function ShoppingEditor({
   }, []);
 
   if (!editor) {
-    return <div className="min-h-[55vh] rounded-xl border bg-card" />;
+    return <div className={cn("rounded-xl border bg-card", minHeightClassName)} />;
   }
 
   return (

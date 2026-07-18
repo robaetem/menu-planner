@@ -75,12 +75,19 @@ export async function listVleesjeNames(): Promise<string[]> {
   return (data || []).map((r: { name: string }) => r.name);
 }
 
-/** The household's single boodschappenlijstje document (TipTap JSON), or null. */
-export async function getShoppingDoc(): Promise<unknown | null> {
+/** The household's permanent manual document and replaceable planner document. */
+export async function getShoppingDocs(): Promise<{ manual: unknown | null; generated: unknown | null }> {
   const db = getDb();
-  const { data, error } = await db.from("shopping_doc").select("content").limit(1).maybeSingle();
+  const { data, error } = await db
+    .from("shopping_doc")
+    .select("content, generated_content")
+    .limit(1)
+    .maybeSingle();
   if (error) throw error;
-  return data?.content ?? null;
+  return {
+    manual: data?.content ?? null,
+    generated: data?.generated_content ?? null,
+  };
 }
 
 /** User-managed shopping sections, ordered. */
