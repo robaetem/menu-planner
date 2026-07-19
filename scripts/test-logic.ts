@@ -7,6 +7,7 @@ import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
 import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } from "../lib/recipes/images";
 import { shoppingDocPatch } from "../lib/shopping/document-sections";
+import { clampFreezerCount, normalizeFreezerTab } from "../lib/freezer/inventory";
 
 let failures = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -36,6 +37,13 @@ eq("generated shopping save cannot patch manual content", shoppingDocPatch("gene
   generated_content: generatedDoc,
   updated_at: shoppingTimestamp,
 });
+
+// ---- freezer navigation + manual count bounds ----
+eq("known freezer tab preserved", normalizeFreezerTab("groenten"), "groenten");
+eq("unknown freezer tab falls back safely", normalizeFreezerTab("recipes"), "potjes");
+eq("freezer count floors decimals", clampFreezerCount(3.9), 3);
+eq("freezer count clamps below zero", clampFreezerCount(-2), 0);
+eq("freezer count clamps above maximum", clampFreezerCount(120), 99);
 
 // ---- ingredient parsing + normalization (authored for base_servings=2) ----
 const wortelText = `Robin 2 / Amber 1 stuk hamburger

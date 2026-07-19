@@ -80,7 +80,7 @@ export function PotjesView({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Potjes</h1>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Potjes</h2>
           <p className="mt-1 text-sm text-muted-foreground">Wat ligt er in de diepvries?</p>
         </div>
         <Button onClick={() => setDialogOpen(true)} className="shrink-0">
@@ -101,7 +101,7 @@ export function PotjesView({
           <div className="flex size-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-600 dark:bg-sky-950/50 dark:text-sky-300">
             <Snowflake className="size-7" />
           </div>
-          <h2 className="mt-4 text-lg font-semibold">De diepvries is leeg</h2>
+          <h3 className="mt-4 text-lg font-semibold">De diepvries is leeg</h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             Voeg een potje toe telkens je een portie invriest. Daarna kan je het inplannen.
           </p>

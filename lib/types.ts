@@ -93,6 +93,15 @@ export type Vleesje = {
   created_at: string;
 };
 
+/** Fully manual frozen-vegetable inventory; no recipe or planning coupling. */
+export type Groente = {
+  id: string;
+  name: string;
+  count: number;
+  sort: number;
+  created_at: string;
+};
+
 /** A user-managed shopping section (Groenten & Fruit, Vlees & Vis, …). */
 export type IngredientCategory = {
   id: string;

@@ -104,6 +104,7 @@ export async function addPotjeFromInventory(
   }
   revalidatePath("/planning");
   revalidatePath("/potjes");
+  revalidatePath("/diepvries");
 }
 
 /** "Gerecht" — assign a recipe to the day (yellow card). */
@@ -174,6 +175,7 @@ export async function deleteMeal(mealId: string): Promise<void> {
   revalidatePath("/planning");
   revalidatePath("/potjes");
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
 }
 
 // ----------------------------------------------------------- template vleesjes ---
@@ -237,6 +239,7 @@ export async function setMealVleesjes(mealId: string, vleesjes: TemplateVleesje[
   if (error) throw error;
   revalidatePath("/planning");
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
 }
 
 /** Set how many extra potjes to cook & freeze, per person (Robin / Amber). */

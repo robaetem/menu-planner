@@ -17,6 +17,8 @@ const TABLES = [
   "ingredient_category_map",
   "vleesjes",
   "vleesje_names",
+  "groenten",
+  "groente_names",
 ];
 
 function readEnvFile(path) {

@@ -1,4 +1,4 @@
-import { CalendarDays, BookOpen, Snowflake, Beef, ShoppingCart, type LucideIcon } from "lucide-react";
+import { CalendarDays, BookOpen, Snowflake, ShoppingCart, type LucideIcon } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -27,15 +27,9 @@ export const NAV_ITEMS: NavItem[] = [
     description: "Receptendatabank",
   },
   {
-    title: "Potjes",
-    href: "/potjes",
+    title: "Diepvries",
+    href: "/diepvries",
     icon: Snowflake,
-    description: "Diepvriesvoorraad",
-  },
-  {
-    title: "Vleesjes",
-    href: "/vleesjes",
-    icon: Beef,
-    description: "Vlees in de diepvries",
+    description: "Potjes, vleesjes & groenten",
   },
 ];

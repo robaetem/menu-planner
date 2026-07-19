@@ -2,6 +2,7 @@ import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
 import type {
   Household,
+  Groente,
   IngredientCategory,
   IngredientCategoryEntry,
   PlanDayWithMeals,
@@ -65,6 +66,24 @@ export async function listVleesjes(): Promise<Vleesje[]> {
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []) as Vleesje[];
+}
+
+export async function listGroenten(): Promise<Groente[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from("groenten")
+    .select("*")
+    .order("sort", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []) as Groente[];
+}
+
+export async function listGroenteNames(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from("groente_names").select("name").order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row: { name: string }) => row.name);
 }
 
 /** Every vleesje name ever entered — powers the add/pick autocomplete. */

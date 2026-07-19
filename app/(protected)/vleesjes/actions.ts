@@ -31,6 +31,7 @@ export async function createVleesje(name: string, count: number): Promise<void> 
   if (error) throw error;
   await recordVleesjeName(t);
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }
 
@@ -39,6 +40,7 @@ export async function deleteVleesje(id: string): Promise<void> {
   const { error } = await db.from("vleesjes").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }
 
@@ -47,5 +49,6 @@ export async function setVleesjeCount(id: string, value: number): Promise<void> 
   const { error } = await db.from("vleesjes").update({ count: clampCount(value) }).eq("id", id);
   if (error) throw error;
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }

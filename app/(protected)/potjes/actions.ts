@@ -32,6 +32,7 @@ export async function createPotje(name: string, robin: number, amber: number): P
   if (error) throw error;
   await recordPotjeName(t);
   revalidatePath("/potjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }
 
@@ -40,6 +41,7 @@ export async function deletePotje(id: string): Promise<void> {
   const { error } = await db.from("potjes").delete().eq("id", id);
   if (error) throw error;
   revalidatePath("/potjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }
 
@@ -49,5 +51,6 @@ export async function setPotjeCount(id: string, who: "robin" | "amber", value: n
   const { error } = await db.from("potjes").update(patch).eq("id", id);
   if (error) throw error;
   revalidatePath("/potjes");
+  revalidatePath("/diepvries");
   revalidatePath("/planning");
 }

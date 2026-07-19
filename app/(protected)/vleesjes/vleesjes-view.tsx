@@ -61,7 +61,7 @@ export function VleesjesView({
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Vleesjes</h1>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Vleesjes</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Welk vlees ligt er in de diepvries?{total > 0 && ` · ${total} in voorraad`}
           </p>
@@ -76,7 +76,7 @@ export function VleesjesView({
           <div className="flex size-14 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-300">
             <Beef className="size-7" />
           </div>
-          <h2 className="mt-4 text-lg font-semibold">Nog geen vlees in de diepvries</h2>
+          <h3 className="mt-4 text-lg font-semibold">Nog geen vlees in de diepvries</h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             Voeg een vleesje toe telkens je vlees invriest. Daarna kan je het kiezen bij het plannen.
           </p>
