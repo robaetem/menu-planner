@@ -97,6 +97,9 @@ export type Vleesje = {
 export type Groente = {
   id: string;
   name: string;
+  amount: number;
+  unit: import("@/lib/freezer/inventory").GroenteUnit;
+  /** Legacy compatibility field; amount + unit are authoritative. */
   count: number;
   sort: number;
   created_at: string;

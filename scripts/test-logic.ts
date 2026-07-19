@@ -7,7 +7,14 @@ import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
 import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } from "../lib/recipes/images";
 import { shoppingDocPatch } from "../lib/shopping/document-sections";
-import { clampFreezerCount, normalizeFreezerTab } from "../lib/freezer/inventory";
+import {
+  clampFreezerCount,
+  formatGroenteQuantity,
+  legacyCountForAmount,
+  normalizeFreezerTab,
+  normalizeGroenteAmount,
+  normalizeGroenteUnit,
+} from "../lib/freezer/inventory";
 
 let failures = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -44,6 +51,14 @@ eq("unknown freezer tab falls back safely", normalizeFreezerTab("recipes"), "pot
 eq("freezer count floors decimals", clampFreezerCount(3.9), 3);
 eq("freezer count clamps below zero", clampFreezerCount(-2), 0);
 eq("freezer count clamps above maximum", clampFreezerCount(120), 99);
+eq("vegetable amount keeps three decimal places", normalizeGroenteAmount(12.3456), 12.346);
+eq("vegetable amount clamps below zero", normalizeGroenteAmount(-4), 0);
+eq("known vegetable unit preserved", normalizeGroenteUnit("gram"), "gram");
+eq("unknown vegetable unit falls back safely", normalizeGroenteUnit("liter"), "stuk");
+eq("legacy count keeps decimal stock visible", legacyCountForAmount(0.5), 1);
+eq("gram display uses Dutch decimal comma", formatGroenteQuantity(750.5, "gram"), "750,5 gram");
+eq("pieces display pluralizes", formatGroenteQuantity(2, "stuk"), "2 stuks");
+eq("single package stays singular", formatGroenteQuantity(1, "verpakking"), "1 verpakking");
 
 // ---- ingredient parsing + normalization (authored for base_servings=2) ----
 const wortelText = `Robin 2 / Amber 1 stuk hamburger
