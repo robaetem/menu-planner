@@ -14,6 +14,7 @@ export default async function BoodschappenlijstjePage() {
     <BoodschappenlijstjeView
       manualContent={(documents.manual as DocJSON | null) ?? null}
       generatedContent={(documents.generated as DocJSON | null) ?? null}
+      generatedOrigins={documents.generatedOrigins}
       categories={categories}
       mapEntries={mapEntries}
     />

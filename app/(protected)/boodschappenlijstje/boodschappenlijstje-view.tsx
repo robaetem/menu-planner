@@ -6,6 +6,7 @@ import { SlidersHorizontal, Check, Cloud, ListPlus, RefreshCw } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import type { IngredientCategory, IngredientCategoryEntry } from "@/lib/types";
 import type { ShoppingSection as ShoppingSectionKey } from "@/lib/shopping/document-sections";
+import type { ShoppingOriginIndex } from "@/lib/shopping/origins";
 import { ShoppingEditor, type DocJSON } from "./editor";
 import { CategoryManagerDialog } from "./category-manager-dialog";
 import { saveShoppingDoc } from "./actions";
@@ -13,11 +14,13 @@ import { saveShoppingDoc } from "./actions";
 export function BoodschappenlijstjeView({
   manualContent,
   generatedContent,
+  generatedOrigins,
   categories,
   mapEntries,
 }: {
   manualContent: DocJSON | null;
   generatedContent: DocJSON | null;
+  generatedOrigins: ShoppingOriginIndex | null;
   categories: IngredientCategory[];
   mapEntries: IngredientCategoryEntry[];
 }) {
@@ -48,9 +51,10 @@ export function BoodschappenlijstjeView({
         <ShoppingSection
           section="generated"
           title="Uit je planning"
-          description="Wordt vervangen bij ‘Boodschappen bijwerken’. Kopieer blijvende aanpassingen naar ‘Zelf toegevoegd’."
+          description="Wordt vervangen bij ‘Boodschappen bijwerken’. Klik op de ⓘ om te zien uit welke gerechten een regel komt."
           icon={<RefreshCw className="size-4 text-amber-600" />}
           content={generatedContent}
+          origins={generatedOrigins}
         />
       </div>
 
@@ -70,12 +74,14 @@ function ShoppingSection({
   description,
   icon,
   content,
+  origins = null,
 }: {
   section: ShoppingSectionKey;
   title: string;
   description: string;
   icon: React.ReactNode;
   content: DocJSON | null;
+  origins?: ShoppingOriginIndex | null;
 }) {
   const [saved, setSaved] = React.useState<"idle" | "saving" | "saved">("idle");
   const savedTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,7 +127,12 @@ function ShoppingSection({
           </span>
         )}
       </div>
-      <ShoppingEditor content={content} onChange={onChange} minHeightClassName="min-h-[30vh]" />
+      <ShoppingEditor
+        content={content}
+        onChange={onChange}
+        minHeightClassName="min-h-[30vh]"
+        origins={origins}
+      />
     </section>
   );
 }

@@ -4,13 +4,14 @@ import { Plus, ShoppingBasket, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { editorUnit, UNIT_OPTIONS } from "@/lib/planning/units";
 import type { Ingredient, IngredientRow } from "@/lib/types";
 
 // "Samen" amounts are entered for the two of us together; per_serving values are
 // normalized by this on save (so a single-person meal scales to one serving).
 const HOUSEHOLD = 2;
 
-export const UNIT_OPTIONS = ["stuk", "gram", "dl", "cl", "ml", "koffielepel", "theelepel"];
+export { UNIT_OPTIONS } from "@/lib/planning/units";
 
 export type IngRow = {
   key: string;
@@ -37,15 +38,7 @@ function fmt(n: number): string {
   const r = Math.round(n * 1000) / 1000;
   return Number.isInteger(r) ? String(r) : String(r).replace(".", ",");
 }
-function mapUnit(u: string): string {
-  const v = (u || "").toLowerCase().trim();
-  if (v === "g" || v === "gr" || v === "gram" || v === "grammen") return "gram";
-  if (UNIT_OPTIONS.includes(v)) return v;
-  if (v === "stuks" || v === "st") return "stuk";
-  if (v === "koffielepels" || v === "kl") return "koffielepel";
-  if (v === "theelepels" || v === "tl") return "theelepel";
-  return "stuk"; // legacy counts (blik, teen, rol, fles, bos, pak, …) → stuk
-}
+const mapUnit = editorUnit;
 
 /** Stored ingredients → editor rows (Samen shown "for the two of us"). */
 export function rowsFromIngredients(ings: Ingredient[]): IngRow[] {

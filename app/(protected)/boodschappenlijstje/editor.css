@@ -103,3 +103,40 @@
   color: var(--muted-foreground);
   pointer-events: none;
 }
+
+/* ----- Origin "(i)" buttons ---------------------------------------------------
+   Inserted as ProseMirror widget decorations at the end of a shopping line, so
+   they are never part of the document. Kept quiet until hovered so the list
+   still reads as a list.                                                      */
+.tiptap .origin-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: text-bottom;
+  width: 1rem;
+  height: 1rem;
+  margin-left: 0.3rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  color: var(--muted-foreground);
+  opacity: 0.55;
+  cursor: help;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.tiptap .origin-info svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+.tiptap .origin-info:hover,
+.tiptap .origin-info:focus-visible {
+  opacity: 1;
+  color: var(--primary);
+  outline: none;
+}
+.tiptap .origin-info:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+/* Keep the icon readable on a ticked-off (struck-through) line. */
+.tiptap ul[data-type="taskList"] li[data-checked="true"] .origin-info {
+  text-decoration: none;
+}

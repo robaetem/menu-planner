@@ -1,5 +1,6 @@
 import type { Ingredient, PlanMeal } from "@/lib/types";
 import { serializeIngredient } from "@/lib/recipes/ingredient-parser";
+import { displayUnit } from "@/lib/planning/units";
 
 type MealServingContext = Pick<
   PlanMeal,
@@ -66,15 +67,18 @@ export function plannedIngredientQuantity(
   };
 }
 
-/** Format a planned total using the same Dutch ingredient syntax as recipes. */
+/** Format a planned total using the same Dutch ingredient syntax as recipes.
+ *  Display-only, so the unit is pluralized here ("2 tenen knoflook"). */
 export function serializePlannedIngredient(ingredient: Ingredient, meal: MealServingContext): string {
   const quantity = plannedIngredientQuantity(ingredient, meal);
+  const shown = quantity.amount_max ?? quantity.amount;
   const adjusted: Ingredient = {
     ...ingredient,
     scaling: ingredient.scaling === "fixed" ? "fixed" : "per_serving",
     amount: quantity.amount,
     amount_max: quantity.amount_max,
     amounts_per_person: {},
+    unit: shown != null ? displayUnit(ingredient.unit, shown) : ingredient.unit,
   };
   return serializeIngredient(adjusted, 1);
 }

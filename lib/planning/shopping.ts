@@ -1,5 +1,6 @@
 import type { Ingredient, PlanDayWithMeals } from "@/lib/types";
 import { plannedIngredientQuantity } from "@/lib/planning/ingredient-quantity";
+import { COUNTABLE, displayUnit, normalizeUnit } from "@/lib/planning/units";
 
 // Aggregate every planned meal's ingredients into one shopping list.
 //
@@ -13,7 +14,15 @@ import { plannedIngredientQuantity } from "@/lib/planning/ingredient-quantity";
 // Lines merge by (lower(name), lower(unit)); amount_max ("800-1000 g") is used so
 // we never under-buy.
 
-export type ShoppingProvenance = { meal: string; amount: number | null };
+/** Where one contribution to a shopping line came from: which planned meal, on
+ *  which day, and how much of the line that meal accounts for. */
+export type ShoppingProvenance = {
+  meal: string;
+  amount: number | null;
+  /** ISO day (yyyy-mm-dd) the meal is planned on; "" when unknown. */
+  date: string;
+  assignee: string | null;
+};
 export type ShoppingLine = {
   key: string; // `${lower(name)}|${lower(unit)}` — stable check-off key
   name: string;
@@ -32,34 +41,7 @@ export type ShoppingResult = {
   unlinkedMeals: string[];
 };
 
-const COUNTABLE = new Set(["stuk", "blik", "teen", "bos", "pak", "zak", "snee", "plak", "pot", "bol"]);
-const UNIT_PLURAL: Record<string, string> = {
-  koffielepel: "koffielepels",
-  theelepel: "theelepels",
-};
-
-// Reconcile unit spellings so the same ingredient merges regardless of which
-// write path produced it (the editor uses "gram"/"stuk"/…, older data may use
-// "g"/"stuks"/…).
-const UNIT_CANON: Record<string, string> = {
-  g: "gram", gr: "gram", gram: "gram", grams: "gram", grammen: "gram",
-  kg: "kg", kilo: "kg", kilogram: "kg",
-  l: "l", liter: "l", liters: "l",
-  ml: "ml", cl: "cl", dl: "dl",
-  stuk: "stuk", stuks: "stuk", st: "stuk",
-  koffielepel: "koffielepel", koffielepels: "koffielepel", kl: "koffielepel",
-  theelepel: "theelepel", theelepels: "theelepel", tl: "theelepel",
-};
-export function normalizeUnit(unit: string): string {
-  const v = (unit || "").trim().toLowerCase();
-  return UNIT_CANON[v] ?? v;
-}
-
-function displayUnit(unit: string, amount: number): string {
-  const normalized = normalizeUnit(unit);
-  if (normalized in UNIT_PLURAL) return amount === 1 ? normalized : UNIT_PLURAL[normalized];
-  return unit;
-}
+export { normalizeUnit };
 
 export function lineKey(name: string, unit: string): string {
   return `${name.trim().toLowerCase()}|${normalizeUnit(unit)}`;
@@ -74,7 +56,13 @@ export function computeShoppingList(
   let mealsFromFreezer = 0;
   const unlinkedMeals: string[] = [];
 
-  const add = (name: string, unit: string, amount: number | null, isFresh: boolean, mealLabel: string) => {
+  const add = (
+    name: string,
+    unit: string,
+    amount: number | null,
+    isFresh: boolean,
+    origin: ShoppingProvenance,
+  ) => {
     const nm = (name || "").trim();
     if (!nm) return;
     const un = (unit || "").trim();
@@ -89,7 +77,7 @@ export function computeShoppingList(
       line.total = (line.total ?? 0) + amount;
       line.hasNumeric = true;
     }
-    line.provenance.push({ meal: mealLabel, amount });
+    line.provenance.push(origin);
   };
 
   for (const day of days) {
@@ -109,7 +97,13 @@ export function computeShoppingList(
       for (const ig of ings) {
         if (ig.include_in_shopping === false) continue;
         const quantity = plannedIngredientQuantity(ig, meal);
-        add(ig.name, ig.unit, quantity.amount_max ?? quantity.amount, ig.is_fresh, label);
+        const amount = quantity.amount_max ?? quantity.amount;
+        add(ig.name, ig.unit, amount, ig.is_fresh, {
+          meal: label,
+          amount,
+          date: day.day_date || "",
+          assignee: meal.assignee ?? null,
+        });
       }
     }
   }
@@ -134,9 +128,11 @@ export function formatQuantity(line: Pick<ShoppingLine, "total" | "unit" | "hasN
   return line.unit ? `${s} ${displayUnit(line.unit, n)}` : s;
 }
 
-export function formatProvenanceAmount(p: ShoppingProvenance, unit: string): string {
+// A single meal's share is NOT rounded up the way the buy-total is: the parts
+// have to keep adding up to (at most) the total shown on the line.
+export function formatProvenanceAmount(p: Pick<ShoppingProvenance, "amount">, unit: string): string {
   if (p.amount == null) return "—";
   const n = Math.round(p.amount * 100) / 100;
   const s = Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
-  return unit ? `${s} ${unit}` : s;
+  return unit ? `${s} ${displayUnit(unit, n)}` : s;
 }

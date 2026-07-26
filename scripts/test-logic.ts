@@ -7,6 +7,17 @@ import { parseMealLine } from "../lib/planning/meal-parser";
 import { rankRecipes } from "../lib/recipes/ranker";
 import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } from "../lib/recipes/images";
 import { shoppingDocPatch } from "../lib/shopping/document-sections";
+import { isPlainJson, toPlainJson } from "../lib/shopping/plain-json";
+import { editorUnit as mapEditorUnit, UNIT_OPTIONS } from "../lib/planning/units";
+import {
+  buildOriginIndex,
+  containsWord,
+  EMPTY_ORIGIN_INDEX,
+  matchOriginLine,
+  mergeOriginLines,
+  normalizeLineText,
+  sortOrigins,
+} from "../lib/shopping/origins";
 import {
   clampFreezerCount,
   formatGroenteQuantity,
@@ -44,6 +55,40 @@ eq("generated shopping save cannot patch manual content", shoppingDocPatch("gene
   generated_content: generatedDoc,
   updated_at: shoppingTimestamp,
 });
+// An editor autosave must NOT clear the provenance recorded at generation time.
+eq("generated autosave leaves origins alone", shoppingDocPatch("generated", generatedDoc, shoppingTimestamp), {
+  generated_content: generatedDoc,
+  updated_at: shoppingTimestamp,
+});
+eq("regeneration writes document and origins together", shoppingDocPatch("generated", generatedDoc, shoppingTimestamp, EMPTY_ORIGIN_INDEX), {
+  generated_content: generatedDoc,
+  generated_origins: EMPTY_ORIGIN_INDEX,
+  updated_at: shoppingTimestamp,
+});
+
+// ---- Server Action serialization of a TipTap document -------------------------
+// ProseMirror builds `attrs` with Object.create(null); React silently drops such
+// objects when they cross a Server Action boundary, which used to lose every
+// checkbox tick and heading level on autosave.
+const pmAttrs = Object.assign(Object.create(null), { checked: true });
+const pmHeadingAttrs = Object.assign(Object.create(null), { level: 2 });
+const pmDoc = {
+  type: "doc",
+  content: [
+    { type: "heading", attrs: pmHeadingAttrs, content: [{ type: "text", text: "Groenten & Fruit" }] },
+    {
+      type: "taskList",
+      content: [
+        { type: "taskItem", attrs: pmAttrs, content: [{ type: "paragraph", content: [{ type: "text", text: "600 gram gehakt" }] }] },
+      ],
+    },
+  ],
+};
+eq("raw TipTap doc is NOT server-action safe", isPlainJson(pmDoc), false);
+eq("converted doc is server-action safe", isPlainJson(toPlainJson(pmDoc)), true);
+eq("checkbox tick survives the conversion", (toPlainJson(pmDoc) as any).content[1].content[0].attrs, { checked: true });
+eq("heading level survives the conversion", (toPlainJson(pmDoc) as any).content[0].attrs, { level: 2 });
+eq("conversion keeps the text intact", JSON.stringify(toPlainJson(pmDoc)), JSON.stringify(pmDoc));
 
 // ---- freezer navigation + manual count bounds ----
 eq("known freezer tab preserved", normalizeFreezerTab("groenten"), "groenten");
@@ -136,10 +181,10 @@ const ingredientsByRecipe: Record<string, any[]> = {
   s: spoonRows,
 };
 const days: any[] = [
-  { id: "d1", meals: [{ recipe_id: "w", recipe: { id: "w", title: "Wortelpuree met hamburgers" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
-  { id: "d2", meals: [{ recipe_id: "b", recipe: { id: "b", title: "Balletjes in tomatensaus" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
-  { id: "d-spoon", meals: [{ recipe_id: "s", recipe: { id: "s", title: "Lepeltest" }, diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: false }] },
-  { id: "d3", meals: [{ recipe_id: null, recipe: null, raw_text: "Amber en Robin Potje", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: true }] },
+  { id: "d1", day_date: "2026-07-28", meals: [{ recipe_id: "w", recipe: { id: "w", title: "Wortelpuree met hamburgers" }, assignee: "both", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
+  { id: "d2", day_date: "2026-08-01", meals: [{ recipe_id: "b", recipe: { id: "b", title: "Balletjes in tomatensaus" }, assignee: "both", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 1, freezer_amber: 1, from_freezer: false }] },
+  { id: "d-spoon", day_date: "2026-08-02", meals: [{ recipe_id: "s", recipe: { id: "s", title: "Lepeltest" }, assignee: "amber", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: false }] },
+  { id: "d3", day_date: "2026-08-03", meals: [{ recipe_id: null, recipe: null, raw_text: "Amber en Robin Potje", assignee: "both", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: true }] },
 ];
 const res = computeShoppingList(days, ingredientsByRecipe);
 const byKey = Object.fromEntries(res.all.map((l) => [l.key, formatQuantity(l)]));
@@ -154,6 +199,67 @@ eq("theelepel summed and pluralized", byKey["zout|theelepel"], "2 theelepels");
 eq("excluded ingredient ignored", byKey["servet|stuk"], undefined);
 eq("from_freezer ignored", res.mealsFromFreezer, 1);
 eq("meals counted", res.mealsCounted, 3);
+
+// ---- "tenen" as a unit (2 tenen knoflook) ------------------------------------
+const garlicRows = toIngredientRows(parseIngredientsText("4 tenen knoflook"), 2)
+  .map((r) => ({ ...r, recipe_id: "g", id: "knoflook" }));
+eq("tenen parses to the teen unit", { a: garlicRows[0].amount, u: garlicRows[0].unit }, { a: 2, u: "teen" });
+eq("editor keeps teen instead of collapsing it to stuk", mapEditorUnit("tenen"), "teen");
+eq("teen is offered in the recipe editor", UNIT_OPTIONS.includes("teen"), true);
+eq("editor still collapses units it cannot offer", mapEditorUnit("blik"), "stuk");
+eq("editor keeps gram spellings canonical", mapEditorUnit("grammen"), "gram");
+const garlicDays: any[] = [
+  { id: "g1", day_date: "2026-07-28", meals: [{ recipe_id: "g", recipe: { id: "g", title: "Aioli" }, assignee: "both", diner_count: 2, diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: false }] },
+  { id: "g2", day_date: "2026-07-29", meals: [{ recipe_id: "g", recipe: { id: "g", title: "Aioli" }, assignee: "robin", diner_count: 1, diner_keys: ["robin"], freezer_robin: 0, freezer_amber: 0, from_freezer: false }] },
+];
+const garlicRes = computeShoppingList(garlicDays, { g: garlicRows as any[] });
+eq("garlic totals pluralize to tenen", formatQuantity(garlicRes.all[0]), "6 tenen");
+eq("a single clove stays singular", formatQuantity({ total: 1, unit: "teen", hasNumeric: true }), "1 teen");
+eq("teen totals round up like other counted units", formatQuantity({ total: 2.5, unit: "teen", hasNumeric: true }), "3 tenen");
+eq("planned detail line pluralizes tenen", serializePlannedIngredient(garlicRows[0] as any, bothPlusTwo), "8 tenen knoflook");
+
+// ---- shopping line provenance (the (i) tooltip) ------------------------------
+const label = (l: any) => { const q = formatQuantity(l); return q ? `${q} ${l.name}` : l.name; };
+const originIndex = buildOriginIndex(res.all, label);
+const gehaktLine = originIndex.lines.find((l) => l.name === "gehakt")!;
+eq("gehakt line remembers its buy total", gehaktLine.total, "1000 g");
+eq("gehakt came from one meal", gehaktLine.origins.length, 1);
+eq("gehakt origin names the recipe and the day", { m: gehaktLine.origins[0].meal, d: gehaktLine.origins[0].date }, { m: "Balletjes in tomatensaus", d: "2026-08-01" });
+
+// aardappelen is the merged case: 900 g total, from two different days.
+const potatoLine = originIndex.lines.find((l) => l.name === "aardappelen")!;
+eq("merged line lists both meals", potatoLine.origins.length, 2);
+eq("merged line splits the amounts per meal", sortOrigins(potatoLine.origins).map((o) => `${o.amount} · ${o.meal} · ${o.date}`), [
+  "600 g · Wortelpuree met hamburgers · 2026-07-28",
+  "300 g · Balletjes in tomatensaus · 2026-08-01",
+]);
+eq("per-meal shares add up to the buy total", potatoLine.total, "900 g");
+eq("assignee is recorded for a single-person meal", originIndex.lines.find((l) => l.name === "paprikapoeder")!.origins[0].assignee, "amber");
+eq("excluded ingredients get no origins", originIndex.lines.some((l) => l.name === "servet"), false);
+
+// The editor looks the index up by the text of the rendered line.
+eq("exact line text matches", matchOriginLine("1000 g gehakt", originIndex)?.name, "gehakt");
+eq("hand-edited quantity still matches on the name", matchOriginLine("1 kg gehakt", originIndex)?.name, "gehakt");
+eq("a ticked-off line still matches", matchOriginLine("  900 g aardappelen  ", originIndex)?.name, "aardappelen");
+eq("an unrelated line has no origins", matchOriginLine("wc-papier", originIndex), null);
+eq("a heading has no origins", matchOriginLine("Groenten & Fruit", originIndex), null);
+eq("an empty line has no origins", matchOriginLine("   ", originIndex), null);
+eq("no index means no lookups", matchOriginLine("1000 g gehakt", null), null);
+
+// A bought vleesje that reads exactly like an ingredient line shares the one
+// rendered line, so their origins have to be merged onto it.
+const dupLines = mergeOriginLines([
+  { label: "2 Kalkoenbrochette", name: "Kalkoenbrochette", total: "2", origins: [{ meal: "Koude tomaten", date: "2026-07-28", amount: "2", assignee: "both" }] },
+  { label: "2 Kalkoenbrochette", name: "Kalkoenbrochette", total: "2", origins: [{ meal: "Salade met perzik", date: "2026-07-29", amount: "2", assignee: "both" }] },
+]);
+eq("duplicate labels collapse to one line", dupLines.length, 1);
+eq("duplicate labels keep both origins", dupLines[0].origins.map((o) => o.meal), ["Koude tomaten", "Salade met perzik"]);
+
+// Name matching must not fire on a substring of a longer word.
+eq("whole-word match", containsWord("3 stuk uien", "uien"), true);
+eq("substring is not a match", containsWord("3 stuk uien", "ui"), false);
+eq("accented names match", containsWord("2 stuk courgette", "courgette"), true);
+eq("line text normalizes bullets and casing", normalizeLineText("- 600 Gram Gehakt."), "600 gram gehakt");
 
 // ---- ranker ----
 const recipes: any[] = [

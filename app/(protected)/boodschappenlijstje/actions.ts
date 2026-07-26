@@ -2,19 +2,24 @@
 
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/supabase/server";
-import { computeShoppingList, formatQuantity } from "@/lib/planning/shopping";
+import { computeShoppingList, formatQuantity, type ShoppingLine } from "@/lib/planning/shopping";
 import { buildShoppingDoc, type ShoppingGroup } from "@/lib/shopping/build-doc";
 import { shoppingDocPatch, type ShoppingSection } from "@/lib/shopping/document-sections";
+import { buildOriginIndex, mergeOriginLines, originLineFor, type ShoppingOrigin } from "@/lib/shopping/origins";
 import { resolveCategories, FALLBACK_CATEGORY } from "@/lib/shopping/resolve-categories";
 import type { Ingredient, PlanDayWithMeals, TemplateVleesje } from "@/lib/types";
 
 /** Persist one editable boodschappenlijstje section (TipTap JSON). The manual
  * and planner-generated documents live in separate columns so neither autosave
  * nor regeneration can overwrite the other section. */
-export async function saveShoppingDoc(section: ShoppingSection, content: unknown): Promise<void> {
+export async function saveShoppingDoc(
+  section: ShoppingSection,
+  content: unknown,
+  origins?: unknown,
+): Promise<void> {
   const db = getDb();
   const { data: existing } = await db.from("shopping_doc").select("id").limit(1).maybeSingle();
-  const patch = shoppingDocPatch(section, content);
+  const patch = shoppingDocPatch(section, content, new Date().toISOString(), origins);
   if (existing) {
     const { error } = await db.from("shopping_doc").update(patch).eq("id", existing.id);
     if (error) throw error;
@@ -57,27 +62,42 @@ export async function generateShoppingList(dates: string[]): Promise<void> {
   // Build a flat list of { name, qty-label, categoryKey } from recipe ingredients
   // plus the "te kopen" template vleesjes (counted pieces, merged by name).
   type Item = { name: string; label: string };
-  const items: Item[] = result.all.map((l) => {
-    const q = formatQuantity(l);
-    return { name: l.name, label: q ? `${q} ${l.name}` : l.name };
-  });
+  const items: Item[] = result.all.map((l) => ({ name: l.name, label: shoppingLineLabel(l) }));
+
+  // Which planned meals contributed to each line, for the (i) tooltip. Built
+  // with the SAME label helper so a lookup by line text hits exactly.
+  const originIndex = buildOriginIndex(result.all, shoppingLineLabel);
 
   // "Te kopen" template vleesjes: merge by name, keep first-seen casing.
-  const buyVleesjes = new Map<string, { name: string; count: number }>();
+  const buyVleesjes = new Map<
+    string,
+    { name: string; count: number; origins: ShoppingOrigin[] }
+  >();
   for (const day of days) {
     for (const meal of day.meals) {
+      const mealLabel = meal.recipe?.title || meal.freeform_title || meal.raw_text || "Maaltijd";
       for (const v of (meal.template_vleesjes || []) as TemplateVleesje[]) {
         if (v.source !== "buy") continue;
         const name = v.name.trim();
         const key = name.toLowerCase();
         if (!key) continue;
+        const count = Number(v.count) || 1;
         const prev = buyVleesjes.get(key);
-        buyVleesjes.set(key, { name: prev?.name ?? name, count: (prev?.count ?? 0) + (Number(v.count) || 1) });
+        buyVleesjes.set(key, {
+          name: prev?.name ?? name,
+          count: (prev?.count ?? 0) + count,
+          origins: [
+            ...(prev?.origins ?? []),
+            { meal: mealLabel, date: day.day_date || "", amount: String(count), assignee: meal.assignee ?? null },
+          ],
+        });
       }
     }
   }
-  for (const { name, count } of buyVleesjes.values()) {
-    items.push({ name, label: `${count} ${name}` });
+  for (const { name, count, origins } of buyVleesjes.values()) {
+    const label = `${count} ${name}`;
+    items.push({ name, label });
+    originIndex.lines.push(originLineFor(label, name, String(count), origins));
   }
 
   // Categorise every distinct name (cached; AI fills the gaps).
@@ -116,10 +136,18 @@ export async function generateShoppingList(dates: string[]): Promise<void> {
   }
 
   const doc = buildShoppingDoc(groups, "Uit je planning");
-  await saveShoppingDoc("generated", doc);
+  originIndex.lines = mergeOriginLines(originIndex.lines);
+  await saveShoppingDoc("generated", doc, originIndex);
   // Safe here (runs from Planning, not the editor): invalidate so the freshly
   // generated list shows when we navigate to the boodschappenlijstje.
   revalidatePath("/boodschappenlijstje");
+}
+
+/** The exact text one aggregated line gets in the document. Shared with the
+ *  origin index so a tooltip lookup by line text matches. */
+function shoppingLineLabel(line: ShoppingLine): string {
+  const q = formatQuantity(line);
+  return q ? `${q} ${line.name}` : line.name;
 }
 
 function dedupe(lines: string[]): string[] {

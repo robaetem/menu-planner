@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
+import { parseOriginIndex, type ShoppingOriginIndex } from "@/lib/shopping/origins";
 import type {
   Household,
   Groente,
@@ -95,17 +96,22 @@ export async function listVleesjeNames(): Promise<string[]> {
 }
 
 /** The household's permanent manual document and replaceable planner document. */
-export async function getShoppingDocs(): Promise<{ manual: unknown | null; generated: unknown | null }> {
+export async function getShoppingDocs(): Promise<{
+  manual: unknown | null;
+  generated: unknown | null;
+  generatedOrigins: ShoppingOriginIndex | null;
+}> {
   const db = getDb();
   const { data, error } = await db
     .from("shopping_doc")
-    .select("content, generated_content")
+    .select("content, generated_content, generated_origins")
     .limit(1)
     .maybeSingle();
   if (error) throw error;
   return {
     manual: data?.content ?? null,
     generated: data?.generated_content ?? null,
+    generatedOrigins: parseOriginIndex(data?.generated_origins),
   };
 }
 
