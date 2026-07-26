@@ -4,13 +4,14 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Trash2, Snowflake, Minus, Plus, Beef } from "lucide-react";
+import { Trash2, Snowflake, Minus, Plus, Beef, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Diner, PlanMealWithRecipe } from "@/lib/types";
 import { deleteMeal, setMealFreezer } from "./actions";
 import { isVleesjeTemplate, vleesjeSummary } from "./config";
+import { useMealDrag } from "./meal-drag";
 
 function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
   const keys = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
@@ -20,22 +21,27 @@ function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
 export function MealCard({
   meal,
   full,
+  dayDate,
   diners,
   onView,
   onPickVleesje,
 }: {
   meal: PlanMealWithRecipe;
   full: boolean;
+  /** The day this card is currently planned on — the drag's starting point. */
+  dayDate: string;
   diners: Diner[];
   onView: () => void;
   onPickVleesje: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const { drag, begin } = useMealDrag();
   const potje = meal.from_freezer;
   const baseTitle = meal.recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
   const isTemplate = isVleesjeTemplate(meal.recipe);
   const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
+  const beingDragged = drag?.meal.id === meal.id;
 
   function run(fn: () => Promise<void>) {
     start(async () => {
@@ -51,6 +57,7 @@ export function MealCard({
 
   return (
     <div
+      data-meal-card
       onClick={onView}
       className={cn(
         "h-full cursor-pointer rounded-lg border p-3 transition-colors",
@@ -58,11 +65,26 @@ export function MealCard({
           ? "border-sky-300 bg-sky-100/70 hover:border-sky-400 dark:border-sky-900 dark:bg-sky-950/30"
           : "border-amber-300 bg-amber-100/70 hover:border-amber-400 dark:border-amber-900/70 dark:bg-amber-950/30",
         pending && "opacity-60",
+        beingDragged && "opacity-40",
         full ? "" : "min-h-[4.25rem]",
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="font-medium leading-snug text-foreground">
+        <button
+          type="button"
+          onPointerDown={(e) =>
+            begin(e, meal, { date: dayDate, assignee: meal.assignee }, baseTitle)
+          }
+          onClick={(e) => e.stopPropagation()}
+          // touch-action:none stops the browser panning the page when the drag
+          // starts from this handle.
+          className="-ml-1 shrink-0 cursor-grab touch-none p-0.5 text-foreground/35 transition-colors hover:text-foreground/70 active:cursor-grabbing"
+          aria-label={`Verplaats ${baseTitle} naar een andere dag`}
+          title="Sleep naar een andere dag"
+        >
+          <GripVertical className="size-4" />
+        </button>
+        <p className="min-w-0 flex-1 font-medium leading-snug text-foreground">
           {isTemplate ? (
             <TemplateTitle
               title={baseTitle}

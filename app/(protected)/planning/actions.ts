@@ -4,13 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
+import { dinersFor, needs, potjeDelta } from "@/lib/planning/assignment";
 import type { Assignee, TemplateVleesje } from "@/lib/types";
-
-function dinersFor(assignee: Assignee): { diner_keys: string[]; diner_count: number } {
-  if (assignee === "amber") return { diner_keys: ["amber"], diner_count: 1 };
-  if (assignee === "robin") return { diner_keys: ["robin"], diner_count: 1 };
-  return { diner_keys: ["robin", "amber"], diner_count: 2 };
-}
 
 /** Get the plan_day row id for a date, creating it if needed. */
 async function ensureDay(db: SupabaseClient, dayDate: string): Promise<string> {
@@ -60,8 +55,35 @@ export async function setDayNote(dayDate: string, note: string): Promise<void> {
 }
 
 // ------------------------------------------------------------------ meals ----
-function needs(assignee: Assignee): { robin: boolean; amber: boolean } {
-  return { robin: assignee === "both" || assignee === "robin", amber: assignee === "both" || assignee === "amber" };
+
+/** Add (or subtract) potje instances for a name, the way the rest of the app
+ *  treats potjes: the NAME is the identity, so a potje that was removed when it
+ *  hit zero is recreated, and one that drops back to zero is removed again.
+ *  Throws when there is not enough stock to take. */
+async function adjustPotjeByName(
+  db: SupabaseClient,
+  name: string,
+  robin: number,
+  amber: number,
+): Promise<void> {
+  const clean = (name || "").trim();
+  if (!clean || (robin === 0 && amber === 0)) return;
+  const { data: existing } = await db.from("potjes").select("*").ilike("name", clean).maybeSingle();
+  const newRobin = (existing?.robin_count ?? 0) + robin;
+  const newAmber = (existing?.amber_count ?? 0) + amber;
+  if (newRobin < 0 || newAmber < 0) {
+    throw new Error(`Geen potje “${clean}” meer in de diepvries.`);
+  }
+  if (!existing) {
+    const { count } = await db.from("potjes").select("id", { count: "exact", head: true });
+    await db.from("potjes").insert({ name: clean, robin_count: newRobin, amber_count: newAmber, sort: count || 0 });
+    return;
+  }
+  if (newRobin <= 0 && newAmber <= 0) {
+    await db.from("potjes").delete().eq("id", existing.id);
+    return;
+  }
+  await db.from("potjes").update({ robin_count: newRobin, amber_count: newAmber }).eq("id", existing.id);
 }
 
 /** "Potje diepvries" — take a specific potje from the freezer inventory and
@@ -149,32 +171,66 @@ export async function deleteMeal(mealId: string): Promise<void> {
   // name so it works whether the potje still exists (partly consumed) or was
   // removed when it hit zero (recreated). Names are the potje's identity.
   if (meal?.from_freezer) {
-    const name = (meal.freeform_title || meal.raw_text || "").trim();
-    if (name) {
-      const n = needs(meal.assignee as Assignee);
-      const { data: existing } = await db.from("potjes").select("*").ilike("name", name).maybeSingle();
-      if (existing) {
-        await db
-          .from("potjes")
-          .update({
-            robin_count: existing.robin_count + (n.robin ? 1 : 0),
-            amber_count: existing.amber_count + (n.amber ? 1 : 0),
-          })
-          .eq("id", existing.id);
-      } else {
-        const { count } = await db.from("potjes").select("id", { count: "exact", head: true });
-        await db.from("potjes").insert({
-          name,
-          robin_count: n.robin ? 1 : 0,
-          amber_count: n.amber ? 1 : 0,
-          sort: count || 0,
-        });
-      }
-    }
+    const n = needs(meal.assignee as Assignee);
+    await adjustPotjeByName(
+      db,
+      meal.freeform_title || meal.raw_text || "",
+      n.robin ? 1 : 0,
+      n.amber ? 1 : 0,
+    );
   }
   revalidatePath("/planning");
   revalidatePath("/potjes");
   revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
+}
+
+/** Drag & drop: move a planned meal to another day and/or another person.
+ *
+ *  Dropping into a different box changes who eats it, which re-scales the
+ *  ingredients (`diner_keys`/`diner_count`). For a "Potje diepvries" it also
+ *  has to settle up with the freezer, because a potje is stocked per person:
+ *  moving a Samen potje to Amber hands Robin's jar back, and moving an Amber
+ *  potje to Samen needs a spare Robin jar — which is refused when there is
+ *  none. Meals that only touch the shopping list need no reconciliation.  */
+export async function moveMeal(
+  mealId: string,
+  toDayDate: string,
+  toAssignee: Assignee,
+): Promise<void> {
+  const db = getDb();
+  const { data: meal } = await db
+    .from("plan_meals")
+    .select("id, plan_day_id, assignee, from_freezer, freeform_title, raw_text")
+    .eq("id", mealId)
+    .maybeSingle();
+  if (!meal) throw new Error("Maaltijd niet gevonden");
+
+  const toDayId = await ensureDay(db, toDayDate);
+  const from = meal.assignee as Assignee;
+  if (meal.plan_day_id === toDayId && from === toAssignee) return; // dropped where it started
+
+  if (meal.from_freezer && from !== toAssignee) {
+    const delta = potjeDelta(from, toAssignee);
+    // Throws (and changes nothing) when the freezer cannot cover the switch.
+    await adjustPotjeByName(db, meal.freeform_title || meal.raw_text || "", delta.robin, delta.amber);
+  }
+
+  const d = dinersFor(toAssignee);
+  const { error } = await db
+    .from("plan_meals")
+    .update({
+      plan_day_id: toDayId,
+      assignee: toAssignee,
+      diner_keys: d.diner_keys,
+      diner_count: d.diner_count,
+      sort: await nextSort(db, toDayId),
+    })
+    .eq("id", mealId);
+  if (error) throw error;
+
+  revalidatePath("/planning");
+  revalidatePath("/potjes");
   revalidatePath("/diepvries");
 }
 

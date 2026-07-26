@@ -22,7 +22,10 @@ import { DayCard } from "./day-card";
 import { MealDetailDialog } from "./meal-detail-dialog";
 import { ModeManagerDialog } from "./mode-manager-dialog";
 import { VleesjePickerDialog } from "./vleesje-picker-dialog";
-import { extendDays } from "./actions";
+import { MealDragProvider, type DropTarget } from "./meal-drag";
+import { extendDays, moveMeal } from "./actions";
+import { assigneeLabel } from "./config";
+import { formatDayLabel } from "@/lib/date";
 import { generateShoppingList } from "../boodschappenlijstje/actions";
 
 export function PlanningView({
@@ -98,6 +101,25 @@ export function PlanningView({
     });
   }
 
+  /** A meal was dropped on another day / another person. The server refuses the
+   *  move when a potje switch cannot be covered by the freezer, so surface that
+   *  reason rather than a generic failure. */
+  const onDropMeal = React.useCallback(
+    (meal: PlanMealWithRecipe, _from: DropTarget, to: DropTarget) => {
+      const title = meal.recipe?.title ?? meal.freeform_title ?? "Maaltijd";
+      moveMeal(meal.id, to.date, to.assignee)
+        .then(() => {
+          toast.success(`${title} → ${formatDayLabel(to.date)} (${assigneeLabel(to.assignee)})`);
+          router.refresh();
+        })
+        .catch((e: unknown) => {
+          toast.error(e instanceof Error ? e.message : "Verplaatsen mislukt.");
+          console.error(e);
+        });
+    },
+    [router],
+  );
+
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -116,22 +138,24 @@ export function PlanningView({
         </div>
       </div>
 
-      <div className="mt-6 space-y-3">
-        {days.map((d) => (
-          <DayCard
-            key={d.day_date}
-            planningDay={d}
-            diners={diners}
-            potjes={potjes}
-            amberModes={amberModes}
-            robinModes={robinModes}
-            selected={selected.has(d.day_date)}
-            onToggleSelect={() => toggle(d.day_date)}
-            onViewMeal={(m) => setViewing(m)}
-            onPickVleesje={(m) => setPicking(m)}
-          />
-        ))}
-      </div>
+      <MealDragProvider onDrop={onDropMeal}>
+        <div className="mt-6 space-y-3">
+          {days.map((d) => (
+            <DayCard
+              key={d.day_date}
+              planningDay={d}
+              diners={diners}
+              potjes={potjes}
+              amberModes={amberModes}
+              robinModes={robinModes}
+              selected={selected.has(d.day_date)}
+              onToggleSelect={() => toggle(d.day_date)}
+              onViewMeal={(m) => setViewing(m)}
+              onPickVleesje={(m) => setPicking(m)}
+            />
+          ))}
+        </div>
+      </MealDragProvider>
 
       <Button variant="outline" className="mt-3 w-full border-dashed" onClick={onExtend} disabled={extending}>
         <CalendarPlus className="size-4" /> {extending ? "Toevoegen…" : "Voeg dagen toe"}

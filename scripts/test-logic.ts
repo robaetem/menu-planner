@@ -9,6 +9,7 @@ import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } f
 import { shoppingDocPatch } from "../lib/shopping/document-sections";
 import { isPlainJson, toPlainJson } from "../lib/shopping/plain-json";
 import { editorUnit as mapEditorUnit, UNIT_OPTIONS } from "../lib/planning/units";
+import { dinersFor, potjeDelta } from "../lib/planning/assignment";
 import {
   buildOriginIndex,
   containsWord,
@@ -260,6 +261,32 @@ eq("whole-word match", containsWord("3 stuk uien", "uien"), true);
 eq("substring is not a match", containsWord("3 stuk uien", "ui"), false);
 eq("accented names match", containsWord("2 stuk courgette", "courgette"), true);
 eq("line text normalizes bullets and casing", normalizeLineText("- 600 Gram Gehakt."), "600 gram gehakt");
+
+// ---- dragging a meal to another day / another person ------------------------
+// Moving between days keeps the assignee, so nothing is owed to the freezer.
+eq("same person costs the freezer nothing", potjeDelta("both", "both"), { robin: 0, amber: 0 });
+// Samen -> one person hands the other person's potje back.
+eq("Samen to Amber returns Robin's potje", potjeDelta("both", "amber"), { robin: 1, amber: 0 });
+eq("Samen to Robin returns Amber's potje", potjeDelta("both", "robin"), { robin: 0, amber: 1 });
+// One person -> Samen has to take a second potje out of the freezer.
+eq("Amber to Samen takes one of Robin's", potjeDelta("amber", "both"), { robin: -1, amber: 0 });
+eq("Robin to Samen takes one of Amber's", potjeDelta("robin", "both"), { robin: 0, amber: -1 });
+// Swapping people is a trade in both directions at once.
+eq("Amber to Robin trades one for the other", potjeDelta("amber", "robin"), { robin: -1, amber: 1 });
+eq("a delta and its reverse cancel out",
+  (() => { const a = potjeDelta("amber", "both"); const b = potjeDelta("both", "amber"); return { robin: a.robin + b.robin, amber: a.amber + b.amber }; })(),
+  { robin: 0, amber: 0 });
+
+// Dropping in another box re-scales the ingredients for whoever eats it now.
+eq("Samen box scales for two", dinersFor("both"), { diner_keys: ["robin", "amber"], diner_count: 2 });
+eq("Amber box scales for one", dinersFor("amber"), { diner_keys: ["amber"], diner_count: 1 });
+eq("Robin box scales for one", dinersFor("robin"), { diner_keys: ["robin"], diner_count: 1 });
+// A Samen meal dragged into the Amber box must halve a per-serving ingredient.
+const movedRow = toIngredientRows(parseIngredientsText("400 gram Pasta"), 2)[0];
+const asSamen = { ...dinersFor("both"), freezer_robin: 0, freezer_amber: 0 };
+const asAmber = { ...dinersFor("amber"), freezer_robin: 0, freezer_amber: 0 };
+eq("pasta for Samen", serializePlannedIngredient(movedRow as any, asSamen), "400 g Pasta");
+eq("pasta after the drop into Amber", serializePlannedIngredient(movedRow as any, asAmber), "200 g Pasta");
 
 // ---- ranker ----
 const recipes: any[] = [
