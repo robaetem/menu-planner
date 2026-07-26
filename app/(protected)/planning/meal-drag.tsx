@@ -28,6 +28,12 @@ type DragState = {
   /** Width of the card we picked up, so the ghost matches it. */
   width: number;
   over: DropTarget | null;
+  /** The day card under the pointer — only that one opens up its boxes. */
+  overDay: string | null;
+  /** Set once the pointer has left the day the drag started on, so that day
+   *  does not rearrange itself under your finger the moment you pick a meal
+   *  up. Coming back to it later is fine. */
+  leftSource: boolean;
 };
 
 /** How far the pointer must travel before this counts as a drag and not a tap. */
@@ -45,12 +51,15 @@ type DragContextValue = {
     label: string,
   ) => void;
   isOver: (target: DropTarget) => boolean;
+  /** True while this day should show all three boxes to drop into. */
+  isDayOpen: (date: string) => boolean;
 };
 
 const DragContext = React.createContext<DragContextValue>({
   drag: null,
   begin: () => {},
   isOver: () => false,
+  isDayOpen: () => false,
 });
 
 export function useMealDrag(): DragContextValue {
@@ -61,14 +70,20 @@ function sameTarget(a: DropTarget, b: DropTarget): boolean {
   return a.date === b.date && a.assignee === b.assignee;
 }
 
-function zoneAt(x: number, y: number): DropTarget | null {
+/** What is under the pointer: the exact box, and the day card it belongs to.
+ *  The day is tracked separately because a day's empty boxes do not exist in
+ *  the DOM until that day is the one being hovered. */
+function targetAt(x: number, y: number): { zone: DropTarget | null; day: string | null } {
   const el = document.elementFromPoint(x, y);
-  const zone = el instanceof Element ? el.closest("[data-drop-date]") : null;
-  if (!zone) return null;
-  const date = zone.getAttribute("data-drop-date");
-  const assignee = zone.getAttribute("data-drop-assignee");
-  if (!date || !assignee) return null;
-  return { date, assignee: assignee as Assignee };
+  if (!(el instanceof Element)) return { zone: null, day: null };
+  const day = el.closest("[data-day-card]")?.getAttribute("data-day-card") ?? null;
+  const box = el.closest("[data-drop-date]");
+  const date = box?.getAttribute("data-drop-date");
+  const assignee = box?.getAttribute("data-drop-assignee");
+  return {
+    zone: date && assignee ? { date, assignee: assignee as Assignee } : null,
+    day,
+  };
 }
 
 export function MealDragProvider({
@@ -150,6 +165,7 @@ export function MealDragProvider({
           started = true;
         }
         ev.preventDefault();
+        const { zone, day } = targetAt(ev.clientX, ev.clientY);
         setDrag({
           meal,
           from,
@@ -157,12 +173,14 @@ export function MealDragProvider({
           width,
           x: ev.clientX,
           y: ev.clientY,
-          over: zoneAt(ev.clientX, ev.clientY),
+          over: zone,
+          overDay: day,
+          leftSource: (live.current?.leftSource ?? false) || (day !== null && day !== from.date),
         });
         scrollTowards(ev.clientY);
       }
 
-      function onUp() {
+      function onUp(ev: PointerEvent) {
         const state = live.current;
         cleanup();
         setDrag(null);
@@ -170,8 +188,13 @@ export function MealDragProvider({
         // The pointerup lands on whatever is under the finger; swallow the
         // click it produces so dropping onto a card does not also open it.
         swallowNextClick();
-        if (state.over && !sameTarget(state.over, state.from)) {
-          onDrop(state.meal, state.from, state.over);
+        // Hit-test once more at the release point. A day's boxes only render
+        // once it is hovered, so the box under the pointer can be newer than
+        // the last pointermove saw — releasing right after entering a day
+        // would otherwise drop nothing.
+        const drop = targetAt(ev.clientX, ev.clientY).zone ?? state.over;
+        if (drop && !sameTarget(drop, state.from)) {
+          onDrop(state.meal, state.from, drop);
         }
       }
 
@@ -199,7 +222,21 @@ export function MealDragProvider({
     [drag],
   );
 
-  const value = React.useMemo(() => ({ drag, begin, isOver }), [drag, begin, isOver]);
+  // Only the hovered day opens up. Revealing every day at once made all ten
+  // cards grow the instant you picked a meal up, which shifted the whole page
+  // under the pointer.
+  const isDayOpen = React.useCallback(
+    (date: string) => {
+      if (!drag || drag.overDay !== date) return false;
+      return date !== drag.from.date || drag.leftSource;
+    },
+    [drag],
+  );
+
+  const value = React.useMemo(
+    () => ({ drag, begin, isOver, isDayOpen }),
+    [drag, begin, isOver, isDayOpen],
+  );
 
   return (
     <DragContext.Provider value={value}>
@@ -234,7 +271,10 @@ function DragGhost({ drag }: { drag: DragState }) {
   );
 }
 
-/** Wraps a region of a day card so a meal can be dropped on it. */
+/** Wraps a region of a day card so a meal can be dropped on it. Only the day
+ *  being hovered outlines its boxes — an outline on every day at once was as
+ *  distracting as the layout jump it came with. `outline` is used rather than
+ *  `border` because it does not take up space, so nothing moves. */
 export function DropZone({
   date,
   assignee,
@@ -246,8 +286,8 @@ export function DropZone({
   className?: string;
   children: React.ReactNode;
 }) {
-  const { drag, isOver } = useMealDrag();
-  const active = drag !== null;
+  const { drag, isOver, isDayOpen } = useMealDrag();
+  const hinted = drag !== null && drag.overDay === date;
   const over = isOver({ date, assignee });
   return (
     <div
@@ -255,8 +295,8 @@ export function DropZone({
       data-drop-assignee={assignee}
       className={[
         "rounded-lg transition-colors",
-        active ? "outline-dashed outline-1 outline-offset-2 outline-border" : "",
-        over ? "outline-2 outline-primary bg-primary/5" : "",
+        hinted && !over ? "outline-dashed outline-1 outline-offset-2 outline-border" : "",
+        over ? "outline-2 outline-offset-2 outline-primary bg-primary/5" : "",
         className ?? "",
       ]
         .filter(Boolean)

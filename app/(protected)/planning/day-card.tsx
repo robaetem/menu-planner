@@ -37,13 +37,15 @@ export function DayCard({
   const both = meals.filter((m) => m.assignee === "both");
   const amber = meals.filter((m) => m.assignee === "amber");
   const robin = meals.filter((m) => m.assignee === "robin");
-  const dragging = useMealDrag().drag !== null;
+  // A day only opens up its empty boxes while a dragged meal is over THIS day.
+  // Opening every day at once made all ten cards grow the moment you picked a
+  // meal up, which shifted the page under the pointer.
+  const open = useMealDrag().isDayOpen(day_date);
 
-  // At rest the card looks exactly as it always has: a Samen meal takes the
-  // full width and hides the split, a split day hides the Samen box. While a
-  // meal is being dragged every box is revealed, so all three are droppable.
-  const showSamen = both.length > 0 || (amber.length === 0 && robin.length === 0) || dragging;
-  const showSplit = both.length === 0 || amber.length > 0 || robin.length > 0 || dragging;
+  // Otherwise the card looks exactly as it always has: a Samen meal takes the
+  // full width and hides the split, a split day hides the Samen box.
+  const showSamen = both.length > 0 || (amber.length === 0 && robin.length === 0) || open;
+  const showSplit = both.length === 0 || amber.length > 0 || robin.length > 0 || open;
 
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
@@ -62,7 +64,7 @@ export function DayCard({
   );
 
   return (
-    <div className="rounded-xl border bg-card p-3 md:p-4">
+    <div data-day-card={day_date} className="rounded-xl border bg-card p-3 md:p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
           <h3 className="text-base font-semibold tracking-tight md:text-lg">{formatDayLabel(day_date)}</h3>
@@ -94,9 +96,10 @@ export function DayCard({
   );
 }
 
-/** One droppable box: the meals planned for that person, plus a way to add
- *  another. A box holds any number of meals, which is what makes swapping two
- *  days possible — drop the first meal across, then drag the second one back. */
+/** One droppable box: the meals planned for that person, or the button to add
+ *  one when it is still empty. A box holds any number of meals, which is what
+ *  makes swapping two days possible — drop the first meal across, then drag
+ *  the second one back. */
 function MealSlot({
   date,
   who,
@@ -133,7 +136,6 @@ function MealSlot({
               onPickVleesje={() => onPickVleesje(m)}
             />
           ))}
-          <AddMealButton dayDate={date} who={who} slim potjes={potjes} />
         </div>
       )}
     </DropZone>

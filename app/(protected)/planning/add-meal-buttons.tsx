@@ -28,14 +28,11 @@ export function AddMealButton({
   dayDate,
   who,
   full,
-  slim,
   potjes,
 }: {
   dayDate: string;
   who: Assignee;
   full?: boolean;
-  /** Compact strip used under a box that already holds a meal. */
-  slim?: boolean;
   potjes: Potje[];
 }) {
   const router = useRouter();
@@ -65,16 +62,14 @@ export function AddMealButton({
           <button
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-card/40 font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground",
-              slim
-                ? "w-full py-1 text-xs"
-                : cn("text-sm", full ? "w-full py-3.5" : "h-full min-h-[4.25rem] w-full"),
+              "flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-card/40 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground",
+              full ? "w-full py-3.5" : "h-full min-h-[4.25rem] w-full",
               pending && "opacity-60",
             )}
           />
         }
       >
-        <Plus className={slim ? "size-3" : "size-4"} /> {assigneeLabel(who)}
+        <Plus className="size-4" /> {assigneeLabel(who)}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="min-w-52">
         <DropdownMenuSub>
