@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { editorUnit, UNIT_OPTIONS } from "@/lib/planning/units";
 import type { Ingredient, IngredientRow } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { PERSON_TEXT, PersonDot, type Person } from "@/components/person-badge";
 
 // "Samen" amounts are entered for the two of us together; per_serving values are
 // normalized by this on save (so a single-person meal scales to one serving).
@@ -119,8 +121,8 @@ export function IngredientListEditor({
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 pl-1">
             <AmountField label="Samen" value={r.samen} onChange={(v) => update(r.key, { samen: v })} />
-            <AmountField label="Amber" value={r.amber} onChange={(v) => update(r.key, { amber: v })} />
-            <AmountField label="Robin" value={r.robin} onChange={(v) => update(r.key, { robin: v })} />
+            <AmountField who="amber" label="Amber" value={r.amber} onChange={(v) => update(r.key, { amber: v })} />
+            <AmountField who="robin" label="Robin" value={r.robin} onChange={(v) => update(r.key, { robin: v })} />
             <Select value={r.unit} onValueChange={(v) => update(r.key, { unit: String(v) })}>
               <SelectTrigger size="sm" className="w-[8.25rem]">
                 <SelectValue />
@@ -160,17 +162,22 @@ export function IngredientListEditor({
 }
 
 function AmountField({
+  who,
   label,
   value,
   onChange,
 }: {
+  who?: Person;
   label: string;
   value: string;
   onChange: (v: string) => void;
 }) {
   return (
     <label className="flex items-center gap-1.5">
-      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className={cn("inline-flex items-center gap-1.5 text-sm", who ? PERSON_TEXT[who] : "text-muted-foreground")}>
+        {who && <PersonDot who={who} />}
+        {label}
+      </span>
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}

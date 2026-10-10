@@ -1,9 +1,9 @@
-/* Apply a SQL file to the Supabase DB via the Management API (direct DB is
+/* Apply a SQL file to the PRODUCTION Supabase DB via the Management API (direct DB is
    IPv6-only/unreachable here). Usage: corepack pnpm dlx tsx scripts/apply-sql.ts <file.sql> */
 import { readFileSync } from "fs";
 
 const env = Object.fromEntries(
-  readFileSync(".env.local", "utf8")
+  readFileSync(".env.prod.local", "utf8")
     .split("\n")
     .filter((l) => l.includes("=") && !l.startsWith("#"))
     .map((l) => {

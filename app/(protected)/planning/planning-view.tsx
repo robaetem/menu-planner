@@ -4,8 +4,9 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarPlus, ShoppingCart, SlidersHorizontal } from "lucide-react";
+import { CalendarPlus, ChartLine, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
@@ -17,10 +18,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, Potje, RecipeWithIngredients, Vleesje } from "@/lib/types";
+import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, RecipeWithIngredients, Vleesje } from "@/lib/types";
+import type { Portion } from "@/lib/freezer/potjes";
+import { FreezerProvider } from "./freezer-context";
 import { DayCard } from "./day-card";
 import { MealDetailDialog } from "./meal-detail-dialog";
-import { ModeManagerDialog } from "./mode-manager-dialog";
+import { FreezerChart } from "./freezer-chart";
 import { VleesjePickerDialog } from "./vleesje-picker-dialog";
 import { MealDragProvider, type DropTarget } from "./meal-drag";
 import { extendDays, moveMeal } from "./actions";
@@ -32,32 +35,31 @@ export function PlanningView({
   days,
   recipes,
   diners,
-  potjes,
+  freezer,
   modes,
   vleesjes,
-  vleesjeNames,
 }: {
   days: PlanningDay[];
   recipes: RecipeWithIngredients[];
   diners: Diner[];
-  potjes: Potje[];
+  freezer: { portions: Portion[]; today: string };
   modes: PlanMode[];
   vleesjes: Vleesje[];
-  vleesjeNames: string[];
 }) {
   const router = useRouter();
   const [extending, startExtend] = useTransition();
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [confirmShop, setConfirmShop] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
-  const [managingModes, setManagingModes] = React.useState(false);
+  const [showChart, setShowChart] = useStoredFlag("planning.freezerChart");
   const [viewing, setViewing] = React.useState<PlanMealWithRecipe | null>(null);
   const [picking, setPicking] = React.useState<PlanMealWithRecipe | null>(null);
 
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
-  const amberModes = modes.filter((m) => m.who === "amber").map((m) => ({ value: m.value, label: m.label }));
-  const robinModes = modes.filter((m) => m.who === "robin").map((m) => ({ value: m.value, label: m.label }));
+  const amberModes = modes.filter((m) => m.who === "amber");
+  const robinModes = modes.filter((m) => m.who === "robin");
+  const dayDates = React.useMemo(() => days.map((d) => d.day_date), [days]);
 
   const viewingRecipe = viewing?.recipe_id
     ? recipes.find((r) => r.id === viewing.recipe_id) ?? null
@@ -121,22 +123,33 @@ export function PlanningView({
   );
 
   return (
+    <FreezerProvider value={freezer}>
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Planning</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Jullie weekmenu vanaf vandaag
-            {count > 0 && ` · ${count} ${count === 1 ? "dag" : "dagen"} geselecteerd`}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Planning</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setManagingModes(true)} className="shrink-0">
-            <SlidersHorizontal className="size-4" /> Situaties
+          <Button
+            variant="outline"
+            onClick={() => setShowChart(!showChart)}
+            aria-pressed={showChart}
+            className={cn("shrink-0", showChart && "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15")}
+          >
+            <ChartLine className="size-4" /> Potjesverloop
           </Button>
           <ShopButton count={count} onClick={() => setConfirmShop(true)} />
         </div>
       </div>
+
+      {showChart && (
+        <div className="mt-5">
+          <FreezerChart
+            days={dayDates}
+            robinLabel={robinLabel}
+            amberLabel={amberLabel}
+            onClose={() => setShowChart(false)}
+          />
+        </div>
+      )}
 
       <MealDragProvider onDrop={onDropMeal}>
         <div className="mt-6 space-y-3">
@@ -145,7 +158,6 @@ export function PlanningView({
               key={d.day_date}
               planningDay={d}
               diners={diners}
-              potjes={potjes}
               amberModes={amberModes}
               robinModes={robinModes}
               selected={selected.has(d.day_date)}
@@ -186,14 +198,6 @@ export function PlanningView({
         </AlertDialogContent>
       </AlertDialog>
 
-      <ModeManagerDialog
-        open={managingModes}
-        onOpenChange={setManagingModes}
-        modes={modes}
-        amberLabel={amberLabel}
-        robinLabel={robinLabel}
-      />
-
       <MealDetailDialog
         meal={viewing}
         recipe={viewingRecipe}
@@ -211,12 +215,32 @@ export function PlanningView({
         meal={picking}
         recipeTitle={picking?.recipe?.title ?? picking?.freeform_title ?? "Gerecht"}
         vleesjes={vleesjes}
-        vleesjeNames={vleesjeNames}
         open={picking !== null}
         onOpenChange={(o) => !o && setPicking(null)}
       />
     </div>
+    </FreezerProvider>
   );
+}
+
+/** A boolean remembered in this browser (best effort: storage may be blocked). */
+function useStoredFlag(key: string): [boolean, (v: boolean) => void] {
+  const [value, setValue] = React.useState(false);
+  React.useEffect(() => {
+    try {
+      setValue(localStorage.getItem(key) === "1");
+    } catch {}
+  }, [key]);
+  const set = React.useCallback(
+    (v: boolean) => {
+      setValue(v);
+      try {
+        localStorage.setItem(key, v ? "1" : "0");
+      } catch {}
+    },
+    [key],
+  );
+  return [value, set];
 }
 
 function ShopButton({ count, onClick }: { count: number; onClick: () => void }) {

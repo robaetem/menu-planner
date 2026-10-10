@@ -75,15 +75,6 @@ export type PlanMode = {
   created_at: string;
 };
 
-export type Potje = {
-  id: string;
-  name: string;
-  robin_count: number;
-  amber_count: number;
-  sort: number;
-  created_at: string;
-};
-
 /** Raw meat in the freezer — single shared count (not portioned per person). */
 export type Vleesje = {
   id: string;

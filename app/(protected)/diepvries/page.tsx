@@ -2,12 +2,13 @@ import {
   getHousehold,
   listGroenteNames,
   listGroenten,
+  listPortions,
   listPotjeNames,
-  listPotjes,
   listVleesjeNames,
   listVleesjes,
 } from "@/lib/data";
 import { normalizeFreezerTab } from "@/lib/freezer/inventory";
+import { todayIso } from "@/lib/date";
 import { DiepvriesView } from "./diepvries-view";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,8 @@ export default async function DiepvriesPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const params = await searchParams;
-  const [potjes, household, potjeNames, vleesjes, vleesjeNames, groenten, groenteNames] = await Promise.all([
-    listPotjes(),
+  const [portions, household, potjeNames, vleesjes, vleesjeNames, groenten, groenteNames] = await Promise.all([
+    listPortions(),
     getHousehold(),
     listPotjeNames(),
     listVleesjes(),
@@ -31,7 +32,8 @@ export default async function DiepvriesPage({
   return (
     <DiepvriesView
       initialTab={normalizeFreezerTab(params.tab)}
-      potjes={potjes}
+      portions={portions}
+      today={todayIso()}
       diners={household.diners}
       potjeNames={potjeNames}
       vleesjes={vleesjes}

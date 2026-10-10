@@ -1,6 +1,8 @@
 import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
 import { parseOriginIndex, type ShoppingOriginIndex } from "@/lib/shopping/origins";
+import type { Portion, Who } from "@/lib/freezer/potjes";
+import { resolveTitle } from "@/app/(protected)/planning/config";
 import type {
   Household,
   Groente,
@@ -9,7 +11,6 @@ import type {
   PlanDayWithMeals,
   PlanMode,
   PlanningDay,
-  Potje,
   RecipeTag,
   RecipeWithIngredients,
   Vleesje,
@@ -27,7 +28,14 @@ export async function getHousehold(): Promise<Household> {
   const db = getDb();
   const { data } = await db.from("household").select("*").limit(1).single();
   if (!data) {
-    return { id: "", name: "Robin & Amber", diners: DEFAULT_DINERS, default_people: 2, plan_horizon: null, created_at: "" };
+    return {
+      id: "",
+      name: "Robin & Amber",
+      diners: DEFAULT_DINERS,
+      default_people: 2,
+      plan_horizon: null,
+      created_at: "",
+    };
   }
   return {
     ...data,
@@ -49,14 +57,39 @@ export async function listRecipes(): Promise<RecipeWithIngredients[]> {
   return (data || []).map((r) => sortIngredients(r as RecipeWithIngredients));
 }
 
-export async function listPotjes(): Promise<Potje[]> {
+const PORTION_SELECT = `
+  id, who, name, frozen_on, source_meal_id, eaten_by_meal_id,
+  source:plan_meals!freezer_portions_source_meal_id_fkey(
+    freeform_title, raw_text, template_vleesjes, recipe:recipes(title), day:plan_days(day_date)
+  ),
+  eaten:plan_meals!freezer_portions_eaten_by_meal_id_fkey(day:plan_days(day_date))
+`;
+
+/** Every frozen portion with its cook/eat dates. Portions eaten before today
+ *  are left out — they are gone. */
+export async function listPortions(): Promise<Portion[]> {
   const db = getDb();
-  const { data, error } = await db
-    .from("potjes")
-    .select("*")
-    .order("created_at", { ascending: true });
+  const { data, error } = await db.from("freezer_portions").select(PORTION_SELECT);
   if (error) throw error;
-  return (data || []) as Potje[];
+  const today = todayIso();
+  return (data || [])
+    .map((row: any): Portion => {
+      const source = row.source;
+      const title = source
+        ? resolveTitle(source.recipe?.title ?? source.freeform_title ?? source.raw_text ?? "Potje", source.template_vleesjes)
+        : row.name;
+      return {
+        id: row.id,
+        who: row.who as Who,
+        name: (title || row.name || "Potje").trim(),
+        sourceMealId: row.source_meal_id,
+        cookOn: source?.day?.day_date ?? null,
+        frozenOn: row.frozen_on,
+        eatenByMealId: row.eaten_by_meal_id,
+        eatenOn: row.eaten?.day?.day_date ?? null,
+      };
+    })
+    .filter((p) => !(p.eatenOn && p.eatenOn < today));
 }
 
 export async function listVleesjes(): Promise<Vleesje[]> {
@@ -105,6 +138,9 @@ export async function getShoppingDocs(): Promise<{
   const { data, error } = await db
     .from("shopping_doc")
     .select("content, generated_content, generated_origins")
+    // One row is the intent; ordering keeps every reader and writer on the same
+    // row should a stray duplicate exist.
+    .order("id")
     .limit(1)
     .maybeSingle();
   if (error) throw error;

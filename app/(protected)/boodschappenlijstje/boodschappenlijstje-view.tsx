@@ -28,13 +28,8 @@ export function BoodschappenlijstjeView({
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Boodschappenlijstje</h1>
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-            Je vaste en geplande boodschappen op één plek
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Boodschappenlijstje</h1>
         <Button variant="outline" onClick={() => setManaging(true)} className="shrink-0">
           <SlidersHorizontal className="size-4" /> Categorieën
         </Button>

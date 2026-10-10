@@ -9,13 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Diner, PlanMealWithRecipe } from "@/lib/types";
+import { formatDayShort } from "@/lib/date";
+import type { Portion, Who } from "@/lib/freezer/potjes";
+import { PersonBadge, PersonDot } from "@/components/person-badge";
 import { deleteMeal, setMealFreezer } from "./actions";
+import { useFreezer } from "./freezer-context";
 import { isVleesjeTemplate, vleesjeSummary } from "./config";
 import { useMealDrag } from "./meal-drag";
 
-function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
-  const keys = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
-  return keys.map((k) => diners.find((d) => d.key === k)?.label ?? k);
+function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): { who: Who; label: string }[] {
+  const keys: Who[] = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
+  return keys.map((k) => ({ who: k, label: diners.find((d) => d.key === k)?.label ?? k }));
 }
 
 export function MealCard({
@@ -42,6 +46,8 @@ export function MealCard({
   const isTemplate = isVleesjeTemplate(meal.recipe);
   const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
   const beingDragged = drag?.meal.id === meal.id;
+  const { portions, today } = useFreezer();
+  const origin = potje ? freezerOrigin(portions.filter((p) => p.eatenByMealId === meal.id), today) : null;
 
   function run(fn: () => Promise<void>) {
     start(async () => {
@@ -49,7 +55,7 @@ export function MealCard({
         await fn();
         router.refresh();
       } catch (e) {
-        toast.error("Mislukt.");
+        toast.error(e instanceof Error ? e.message : "Mislukt.");
         console.error(e);
       }
     });
@@ -107,26 +113,42 @@ export function MealCard({
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {dinerLabels(meal, diners).map((l) => (
-          <span
-            key={l}
-            className="rounded-full border border-foreground/15 bg-background/60 px-2 py-0.5 text-xs font-medium"
-          >
-            {l}
-          </span>
+        {dinerLabels(meal, diners).map((d) => (
+          <PersonBadge key={d.who} who={d.who}>
+            {d.label}
+          </PersonBadge>
         ))}
+        {origin && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-sky-300/70 bg-background/60 px-2 py-0.5 text-xs text-sky-800 dark:border-sky-900 dark:text-sky-300">
+            <Snowflake className="size-3" />
+            {origin}
+          </span>
+        )}
         {!potje && (
           <PotjesControl
+            mealId={meal.id}
             robin={meal.freezer_robin}
             amber={meal.freezer_amber}
             robinLabel={diners.find((d) => d.key === "robin")?.label ?? "Robin"}
             amberLabel={diners.find((d) => d.key === "amber")?.label ?? "Amber"}
+            pending={pending}
             onChange={(r, a) => run(() => setMealFreezer(meal.id, r, a))}
           />
         )}
       </div>
     </div>
   );
+}
+
+/** Where a planned "Potje diepvries" comes from: already frozen, or cooked
+ *  earlier in the plan (then it says which day). */
+function freezerOrigin(mine: Portion[], today: string): string | null {
+  if (mine.length === 0) return "geen potje meer gekoppeld";
+  const cooked = mine
+    .filter((p) => p.sourceMealId && p.cookOn && p.cookOn >= today)
+    .map((p) => p.cookOn!)
+    .sort();
+  return cooked.length ? `gemaakt ${formatDayShort(cooked[cooked.length - 1])}` : "uit de diepvries";
 }
 
 /** Render a recipe title, turning the "[vleesje]" token into a clickable chip
@@ -185,21 +207,29 @@ function VleesjeChip({ chosen, onPick }: { chosen: string; onPick: () => void })
 }
 
 function PotjesControl({
+  mealId,
   robin,
   amber,
   robinLabel,
   amberLabel,
+  pending,
   onChange,
 }: {
+  mealId: string;
   robin: number;
   amber: number;
   robinLabel: string;
   amberLabel: string;
+  pending: boolean;
   onChange: (robin: number, amber: number) => void;
 }) {
+  const { portions } = useFreezer();
   const r = robin || 0;
   const a = amber || 0;
   const total = r + a;
+  const mine = portions.filter((p) => p.sourceMealId === mealId);
+  const plannedFor = (who: Who) => mine.filter((p) => p.who === who && p.eatenByMealId);
+
   return (
     <Popover>
       <PopoverTrigger
@@ -217,43 +247,88 @@ function PotjesControl({
       >
         <Snowflake className="size-3" />
         {total > 0 ? `+${total} ${total === 1 ? "potje" : "potjes"}` : "potje"}
+        {mine.some((p) => p.eatenByMealId) && (
+          <span className="text-muted-foreground">
+            · {mine.filter((p) => p.eatenByMealId).length} ingepland
+          </span>
+        )}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto p-2.5" onClick={(e) => e.stopPropagation()}>
-        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
-          <PotjeRow label={robinLabel} value={r} onChange={(n) => onChange(n, a)} />
-          <PotjeRow label={amberLabel} value={a} onChange={(n) => onChange(r, n)} />
+      <PopoverContent align="start" className="w-auto max-w-[calc(100vw-2rem)] p-3" onClick={(e) => e.stopPropagation()}>
+        <p className="mb-2.5 text-sm font-medium">Extra porties invriezen</p>
+        <div className="space-y-3">
+          <PotjeRow
+            who="robin"
+            label={robinLabel}
+            value={r}
+            planned={plannedFor("robin").map((p) => p.eatenOn ?? "")}
+            pending={pending}
+            onChange={(n) => onChange(n, a)}
+          />
+          <PotjeRow
+            who="amber"
+            label={amberLabel}
+            value={a}
+            planned={plannedFor("amber").map((p) => p.eatenOn ?? "")}
+            pending={pending}
+            onChange={(n) => onChange(r, n)}
+          />
         </div>
-        <p className="mt-2 text-center text-xs text-muted-foreground">extra potjes invriezen</p>
       </PopoverContent>
     </Popover>
   );
 }
 
-/** One person's stepper row inside the potjes popover. */
-function PotjeRow({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+/** One person's row inside the potjes popover: how many. */
+function PotjeRow({
+  label,
+  value,
+  planned,
+  pending,
+  onChange,
+  who,
+}: {
+  who: Who;
+  label: string;
+  value: number;
+  /** Days that already plan to eat a portion of this — can't go below. */
+  planned: string[];
+  pending: boolean;
+  onChange: (n: number) => void;
+}) {
   return (
-    <>
-      <span className="text-sm font-medium">{label}</span>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="icon-sm"
-          onClick={() => onChange(Math.max(0, value - 1))}
-          disabled={value <= 0}
-          aria-label={`Minder potjes voor ${label}`}
-        >
-          <Minus className="size-3.5" />
-        </Button>
-        <span className="min-w-8 text-center text-sm font-medium tabular-nums">{value}</span>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          onClick={() => onChange(value + 1)}
-          aria-label={`Meer potjes voor ${label}`}
-        >
-          <Plus className="size-3.5" />
-        </Button>
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-2 text-sm font-medium">
+          <PersonDot who={who} />
+          {label}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => onChange(Math.max(0, value - 1))}
+            disabled={value <= planned.length || pending}
+            aria-label={`Minder potjes voor ${label}`}
+          >
+            <Minus className="size-3.5" />
+          </Button>
+          <span className="min-w-6 text-center text-sm font-medium tabular-nums">{value}</span>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => onChange(value + 1)}
+            disabled={pending}
+            aria-label={`Meer potjes voor ${label}`}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
       </div>
-    </>
+      {planned.length > 0 && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {planned.length} ingepland: {planned.filter(Boolean).sort().map(formatDayShort).join(", ")}
+        </p>
+      )}
+    </div>
   );
 }

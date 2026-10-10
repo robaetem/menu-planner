@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Minus, X, Snowflake, ShoppingCart, Sparkles, Beef } from "lucide-react";
+import { Plus, Minus, X, Snowflake, ShoppingCart, Beef } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,29 +16,45 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { PlanMealWithRecipe, TemplateVleesje, Vleesje } from "@/lib/types";
+import { parseBuyText } from "@/lib/shopping/buy-lines";
 import { setMealVleesjes } from "./actions";
-import { parseBuyVleesjes } from "./ai-actions";
+
+type Stock = { name: string; count: number };
 
 export function VleesjePickerDialog({
   meal,
   recipeTitle,
   vleesjes,
-  vleesjeNames,
   open,
   onOpenChange,
 }: {
   meal: PlanMealWithRecipe | null;
   recipeTitle: string;
   vleesjes: Vleesje[];
-  vleesjeNames: string[];
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
   const router = useRouter();
   const [lines, setLines] = React.useState<TemplateVleesje[]>([]);
   const [buyText, setBuyText] = React.useState("");
-  const [parsing, setParsing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+
+  // What this meal could take from the freezer, per name. The same vleesje can
+  // sit in the freezer as several batches (one row per freeze date); the picker
+  // reserves by name, so it counts them together. What this meal already
+  // reserved is out of the inventory but goes back in when it saves, so it
+  // counts as stock here.
+  const stock = React.useMemo(() => {
+    const m = new Map<string, Stock>();
+    const add = (name: string, count: number) => {
+      const key = name.toLowerCase();
+      const prev = m.get(key);
+      m.set(key, { name: prev?.name ?? name, count: (prev?.count ?? 0) + count });
+    };
+    for (const v of vleesjes) add(v.name, v.count);
+    for (const v of meal?.template_vleesjes ?? []) if (v.source === "freezer") add(v.name, v.count);
+    return [...m.values()];
+  }, [vleesjes, meal]);
 
   React.useEffect(() => {
     if (open) {
@@ -53,11 +69,11 @@ export function VleesjePickerDialog({
     const key = name.toLowerCase();
     return lines.filter((l) => l.source === "freezer" && l.name.toLowerCase() === key).reduce((s, l) => s + l.count, 0);
   }
-  function available(v: Vleesje): number {
+  function available(v: Stock): number {
     return Math.max(0, v.count - freezerSelected(v.name));
   }
 
-  function addFreezer(v: Vleesje) {
+  function addFreezer(v: Stock) {
     if (available(v) <= 0) return;
     setLines((prev) => {
       const i = prev.findIndex((l) => l.source === "freezer" && l.name.toLowerCase() === v.name.toLowerCase());
@@ -70,40 +86,20 @@ export function VleesjePickerDialog({
     });
   }
 
-  function addBuy(name: string, count: number) {
-    const t = name.trim();
-    if (!t) return;
-    setLines((prev) => {
-      const i = prev.findIndex((l) => l.source === "buy" && l.name.toLowerCase() === t.toLowerCase());
-      if (i >= 0) {
-        const next = [...prev];
-        next[i] = { ...next[i], count: next[i].count + count };
-        return next;
-      }
-      return [...prev, { name: t, count, source: "buy" }];
-    });
+  /** The selection plus whatever is typed under "Te kopen" ("4 worsten"). */
+  function withBuy(prev: TemplateVleesje[]): TemplateVleesje[] {
+    const buy = parseBuyText(buyText);
+    if (!buy) return prev;
+    const i = prev.findIndex((l) => l.source === "buy" && l.name.toLowerCase() === buy.name.toLowerCase());
+    if (i < 0) return [...prev, { ...buy, source: "buy" }];
+    const next = [...prev];
+    next[i] = { ...next[i], count: next[i].count + buy.count };
+    return next;
   }
 
-  async function onParseBuy() {
-    const t = buyText.trim();
-    if (!t || parsing) return;
-    setParsing(true);
-    try {
-      const parsed = await parseBuyVleesjes(t, vleesjeNames);
-      if (parsed.length === 0) {
-        addBuy(t, 1);
-      } else {
-        for (const p of parsed) addBuy(p.name, p.count);
-      }
-      setBuyText("");
-    } catch (e) {
-      toast.error("Verwerken mislukt.");
-      console.error(e);
-      addBuy(t, 1);
-      setBuyText("");
-    } finally {
-      setParsing(false);
-    }
+  function addBuy() {
+    setLines(withBuy);
+    setBuyText("");
   }
 
   function setCount(idx: number, count: number) {
@@ -112,7 +108,7 @@ export function VleesjePickerDialog({
       const next = [...prev];
       // Don't let a freezer line exceed what's in stock.
       if (next[idx].source === "freezer") {
-        const inv = vleesjes.find((v) => v.name.toLowerCase() === next[idx].name.toLowerCase());
+        const inv = stock.find((v) => v.name.toLowerCase() === next[idx].name.toLowerCase());
         const otherSel = freezerSelected(next[idx].name) - next[idx].count;
         const max = inv ? Math.max(0, inv.count - otherSel) : count;
         count = Math.min(count, max);
@@ -125,7 +121,7 @@ export function VleesjePickerDialog({
   function onSave() {
     if (!meal) return;
     setSaving(true);
-    setMealVleesjes(meal.id, lines)
+    setMealVleesjes(meal.id, withBuy(lines))
       .then(() => {
         router.refresh();
         onOpenChange(false);
@@ -137,7 +133,7 @@ export function VleesjePickerDialog({
       .finally(() => setSaving(false));
   }
 
-  const availableInv = vleesjes.filter((v) => v.count > 0);
+  const availableInv = stock.filter((v) => v.count > 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
@@ -205,7 +201,7 @@ export function VleesjePickerDialog({
                   const left = available(v);
                   return (
                     <button
-                      key={v.id}
+                      key={v.name}
                       type="button"
                       disabled={left <= 0}
                       onClick={() => addFreezer(v)}
@@ -230,29 +226,24 @@ export function VleesjePickerDialog({
             <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold tracking-tight">
               <ShoppingCart className="size-3.5 text-amber-600" /> Te kopen
             </h4>
-            <div className="flex gap-2">
-              <Input
-                value={buyText}
-                onChange={(e) => setBuyText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    onParseBuy();
-                  }
-                }}
-                placeholder="bv. 2 hamburger en 1 worst"
-              />
-              <Button variant="outline" onClick={onParseBuy} disabled={parsing || !buyText.trim()} className="shrink-0">
-                <Sparkles className="size-4" /> {parsing ? "…" : "Toevoegen"}
-              </Button>
-            </div>
+            <Input
+              value={buyText}
+              onChange={(e) => setBuyText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addBuy();
+                }
+              }}
+              placeholder="bv. 4 worsten"
+            />
             <p className="mt-1.5 text-xs text-muted-foreground">
-              Komt onder “Uit je planning” bij “Boodschappen bijwerken”.
+              Bij “Bewaren” komt dit bij het gerecht en op je boodschappenlijstje, onder “Uit je planning”.
             </p>
           </section>
         </div>
 
-        <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4">
+        <DialogFooter className="m-0 shrink-0 gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Annuleren
           </Button>

@@ -9,7 +9,8 @@ import { getRecipeImageUrl, isRemoteRecipeImagePath, normalizeRecipeImageUrl } f
 import { shoppingDocPatch } from "../lib/shopping/document-sections";
 import { isPlainJson, toPlainJson } from "../lib/shopping/plain-json";
 import { editorUnit as mapEditorUnit, UNIT_OPTIONS } from "../lib/planning/units";
-import { dinersFor, potjeDelta } from "../lib/planning/assignment";
+import { dinersFor } from "../lib/planning/assignment";
+import { blockedPotjes, freezerTimeline, pickPortions, potjeChoices, type Portion } from "../lib/freezer/potjes";
 import {
   buildOriginIndex,
   containsWord,
@@ -19,6 +20,7 @@ import {
   normalizeLineText,
   sortOrigins,
 } from "../lib/shopping/origins";
+import { applyBuyLines, parseBuyText } from "../lib/shopping/buy-lines";
 import {
   clampFreezerCount,
   formatGroenteQuantity,
@@ -262,20 +264,65 @@ eq("substring is not a match", containsWord("3 stuk uien", "ui"), false);
 eq("accented names match", containsWord("2 stuk courgette", "courgette"), true);
 eq("line text normalizes bullets and casing", normalizeLineText("- 600 Gram Gehakt."), "600 gram gehakt");
 
-// ---- dragging a meal to another day / another person ------------------------
-// Moving between days keeps the assignee, so nothing is owed to the freezer.
-eq("same person costs the freezer nothing", potjeDelta("both", "both"), { robin: 0, amber: 0 });
-// Samen -> one person hands the other person's potje back.
-eq("Samen to Amber returns Robin's potje", potjeDelta("both", "amber"), { robin: 1, amber: 0 });
-eq("Samen to Robin returns Amber's potje", potjeDelta("both", "robin"), { robin: 0, amber: 1 });
-// One person -> Samen has to take a second potje out of the freezer.
-eq("Amber to Samen takes one of Robin's", potjeDelta("amber", "both"), { robin: -1, amber: 0 });
-eq("Robin to Samen takes one of Amber's", potjeDelta("robin", "both"), { robin: 0, amber: -1 });
-// Swapping people is a trade in both directions at once.
-eq("Amber to Robin trades one for the other", potjeDelta("amber", "robin"), { robin: -1, amber: 1 });
-eq("a delta and its reverse cancel out",
-  (() => { const a = potjeDelta("amber", "both"); const b = potjeDelta("both", "amber"); return { robin: a.robin + b.robin, amber: a.amber + b.amber }; })(),
-  { robin: 0, amber: 0 });
+// ---- potjes: frozen portions --------------------------------------------------
+const portion = (p: Partial<Portion> & { id: string }): Portion => ({
+  who: "robin",
+  name: "Curry",
+  sourceMealId: null,
+  cookOn: null,
+  frozenOn: null,
+  eatenByMealId: null,
+  eatenOn: null,
+  ...p,
+});
+const TODAY = "2026-09-25"; // Friday
+// What the "Potje diepvries" menu offers depends on the day you plan for.
+const stock = [
+  portion({ id: "h", name: "Stoofvlees", frozenOn: "2026-09-01" }),
+  portion({ id: "i", name: "Stoofvlees", who: "amber", frozenOn: "2026-09-01" }),
+  portion({ id: "j", name: "Lasagne", sourceMealId: "wed", cookOn: "2026-09-30" }),
+  portion({ id: "k", name: "Lasagne", who: "amber", sourceMealId: "wed", cookOn: "2026-09-30" }),
+  portion({ id: "l", name: "Soep", eatenByMealId: "x", eatenOn: "2026-09-26" }),
+];
+const names = (date: string, who: "both" | "robin" | "amber") => potjeChoices(stock, date, who, TODAY).map((c) => c.name);
+eq("before Wednesday only what is in the freezer", names("2026-09-30", "robin"), ["Stoofvlees"]);
+eq("Friday also offers what Wednesday cooks", names("2026-10-02", "robin"), ["Stoofvlees", "Lasagne"]);
+eq("a reserved portion is not offered again", names("2026-10-02", "robin").includes("Soep"), false);
+eq("Samen needs one of each", names("2026-10-02", "both"), ["Stoofvlees", "Lasagne"]);
+const lasagne = potjeChoices(stock, "2026-10-02", "robin", TODAY).find((c) => c.name === "Lasagne")!;
+eq("an upcoming dish says when it is ready", { inFreezer: lasagne.inFreezer, next: lasagne.nextReadyOn }, { inFreezer: 0, next: "2026-10-01" });
+eq("pick reserves one per person", pickPortions(stock, "stoofvlees", "2026-09-26", "both", TODAY)?.map((p) => p.id), ["h", "i"]);
+eq("can't pick a dish before it is cooked", pickPortions(stock, "Lasagne", "2026-09-30", "robin", TODAY), null);
+const fifo = [
+  portion({ id: "new", frozenOn: "2026-09-20" }),
+  portion({ id: "old", frozenOn: "2026-08-01" }),
+];
+eq("the oldest portion is eaten first", pickPortions(fifo, "Curry", TODAY, "robin", TODAY)?.[0].id, "old");
+
+// Nothing silently disappears: what can't be picked is listed with why.
+const blocked = (date: string, who: "both" | "robin" | "amber") =>
+  blockedPotjes(stock, date, who, TODAY).map((b) => `${b.name}/${b.who}/${b.reason.kind}`);
+eq("a reserved portion shows as planned", blocked("2026-10-02", "robin"), ["Soep/robin/planned"]);
+eq("a dish cooked later shows as not ready yet", blocked("2026-09-30", "robin"), ["Lasagne/robin/later", "Soep/robin/planned"]);
+eq("Samen: a dish only one person has says so", blockedPotjes(
+  [portion({ id: "m", name: "Chili", frozenOn: "2026-09-01" })], TODAY, "both", TODAY,
+).map((b) => `${b.name}/${b.who}/${b.reason.kind}`), ["Chili/amber/partner"]);
+
+// How the freezer evolves over the plan: cooked in on its day, gone the evening it is eaten.
+{
+  const tl = freezerTimeline(
+    [
+      portion({ id: "t1", frozenOn: "2026-09-01" }),
+      portion({ id: "t2", frozenOn: "2026-09-01", eatenByMealId: "eat", eatenOn: "2026-09-26" }),
+      portion({ id: "t3", who: "amber", sourceMealId: "cook", cookOn: "2026-09-27" }),
+      portion({ id: "t4", who: "amber", sourceMealId: "nodate" }),
+    ],
+    ["2026-09-25", "2026-09-26", "2026-09-27"],
+  );
+  eq("timeline starts with what is in the freezer", tl.start, { robin: 2, amber: 0 });
+  eq("timeline counts each evening", tl.days.map((d) => [d.counts.robin, d.counts.amber]), [[2, 0], [1, 0], [1, 1]]);
+  eq("timeline lists what changed that day", tl.days.map((d) => d.changes.map((c) => `${c.who}${c.delta}`)), [[], ["robin-1"], ["amber1"]]);
+}
 
 // Dropping in another box re-scales the ingredients for whoever eats it now.
 eq("Samen box scales for two", dinersFor("both"), { diner_keys: ["robin", "amber"], diner_count: 2 });
@@ -287,6 +334,43 @@ const asSamen = { ...dinersFor("both"), freezer_robin: 0, freezer_amber: 0 };
 const asAmber = { ...dinersFor("amber"), freezer_robin: 0, freezer_amber: 0 };
 eq("pasta for Samen", serializePlannedIngredient(movedRow as any, asSamen), "400 g Pasta");
 eq("pasta after the drop into Amber", serializePlannedIngredient(movedRow as any, asAmber), "200 g Pasta");
+
+// ---- te kopen vleesjes -> boodschappenlijstje ----
+eq("buy text: '4 worsten'", parseBuyText(" 4  worsten "), { name: "worsten", count: 4 });
+eq("buy text: '2x hamburger'", parseBuyText("2x hamburger"), { name: "hamburger", count: 2 });
+eq("buy text: no number is 1", parseBuyText("kipfilet"), { name: "kipfilet", count: 1 });
+eq("buy text: empty is null", parseBuyText("  "), null);
+{
+  const origin = { meal: "Spinazie", date: "2026-10-10", amount: "4", assignee: "both" };
+  const itemTexts = (doc: any) =>
+    doc.content.map((n: any) =>
+      n.type === "taskList" ? n.content.map((i: any) => i.content[0].content[0].text) : `${n.type}:${n.content?.[0]?.text ?? ""}`,
+    );
+  const empty = { type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Uit je planning" }] }, { type: "paragraph", content: [] }] };
+  const add = applyBuyLines(empty, null, {
+    remove: [],
+    add: [{ label: "4 worsten", name: "worsten", count: 4, category: "Vlees & Vis", origin }],
+  });
+  eq("buy lines: added under its category, blank paragraph gone", itemTexts(add.doc), ["heading:Uit je planning", "heading:Vlees & Vis", ["4 worsten"]]);
+  eq("buy lines: origin recorded", add.origins.lines.map((l) => [l.label, l.origins[0].meal]), [["4 worsten", "Spinazie"]]);
+  const withOther = applyBuyLines(add.doc, add.origins, {
+    remove: [],
+    add: [{ label: "1 kip", name: "kip", count: 1, category: "Vlees & Vis", origin }],
+  });
+  eq("buy lines: second line joins the same heading", itemTexts(withOther.doc), ["heading:Uit je planning", "heading:Vlees & Vis", ["4 worsten", "1 kip"]]);
+  const changed = applyBuyLines(withOther.doc, withOther.origins, {
+    remove: [{ label: "4 worsten", meal: "Spinazie", date: "2026-10-10" }],
+    add: [{ label: "5 worsten", name: "worsten", count: 5, category: "Vlees & Vis", origin: { ...origin, amount: "5" } }],
+  });
+  eq("buy lines: changed count replaces the old line", itemTexts(changed.doc), ["heading:Uit je planning", "heading:Vlees & Vis", ["1 kip", "5 worsten"]]);
+  const cleared = applyBuyLines(changed.doc, changed.origins, {
+    remove: [{ label: "1 kip", meal: "Spinazie", date: "2026-10-10" }, { label: "5 worsten", meal: "Spinazie", date: "2026-10-10" }],
+    add: [],
+  });
+  eq("buy lines: emptied heading goes, list stays editable", itemTexts(cleared.doc), ["heading:Uit je planning", "paragraph:"]);
+  eq("buy lines: origins gone with the lines", cleared.origins.lines, []);
+  eq("buy lines: input doc untouched", itemTexts(empty), ["heading:Uit je planning", "paragraph:"]);
+}
 
 // ---- ranker ----
 const recipes: any[] = [

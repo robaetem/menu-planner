@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <style>.ink{stroke:#1c1b19}.dot{fill:#1c1b19}@media (prefers-color-scheme:dark){.ink{stroke:#fbfcf7}.dot{fill:#fbfcf7}}</style>
+  <path class="ink" d="M23 82V55C14 52 10 46 10 38C10 25 20 16 33 16C41 16 45 20 50 20C55 20 59 16 67 16C80 16 90 25 90 38C90 46 86 52 77 55V82" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle class="dot" cx="41" cy="48" r="5"/>
+  <circle class="dot" cx="59" cy="48" r="5"/>
+  <path class="ink" d="M43 59Q50 66 57 59" stroke-width="5" stroke-linecap="round"/>
+</svg>

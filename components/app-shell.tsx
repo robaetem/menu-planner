@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CookingPot } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import {
   Sidebar,
@@ -22,6 +21,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NAV_ITEMS } from "@/components/nav-config";
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/logo";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
@@ -30,13 +30,10 @@ function isActive(pathname: string, href: string) {
 function Brand({ collapsedHidden = true }: { collapsedHidden?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-        <CookingPot className="size-5" />
-      </div>
-      <div className={cn("flex flex-col leading-tight", collapsedHidden && "group-data-[collapsible=icon]:hidden")}>
-        <span className="text-sm font-semibold tracking-tight">Menu Planner</span>
-        <span className="text-xs text-muted-foreground">Robin &amp; Amber</span>
-      </div>
+      <Logo className="size-9 shrink-0 text-foreground" />
+      <span className={cn("text-sm font-semibold tracking-tight", collapsedHidden && "group-data-[collapsible=icon]:hidden")}>
+        Menu Planner
+      </span>
     </div>
   );
 }
@@ -66,7 +63,7 @@ export function AppShell({
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon" className="border-r">
-        <SidebarHeader className="border-b border-sidebar-border/60 px-3 py-3.5">
+        <SidebarHeader className="h-14 shrink-0 justify-center border-b px-3 py-0">
           <Brand />
         </SidebarHeader>
         <SidebarContent className="px-2 py-3">
@@ -114,7 +111,7 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 px-4 pb-24 pt-5 md:px-7 md:pb-10 md:pt-7">
+        <main className="flex-1 px-4 pb-24 pt-8 md:px-7 md:pb-10 md:pt-8">
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>
       </SidebarInset>

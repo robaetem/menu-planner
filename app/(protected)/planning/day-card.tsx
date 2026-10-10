@@ -2,19 +2,16 @@
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatDayLabel } from "@/lib/date";
-import type { Assignee, Diner, PlanMealWithRecipe, PlanningDay, Potje } from "@/lib/types";
+import type { Assignee, Diner, PlanMealWithRecipe, PlanMode, PlanningDay } from "@/lib/types";
 import { ModePill } from "./mode-pill";
 import { MealCard } from "./meal-card";
 import { AddMealButton } from "./add-meal-buttons";
 import { DayNote } from "./day-note";
 import { DropZone, useMealDrag } from "./meal-drag";
 
-type ModeOption = { value: string; label: string };
-
 export function DayCard({
   planningDay,
   diners,
-  potjes,
   amberModes,
   robinModes,
   selected,
@@ -24,9 +21,8 @@ export function DayCard({
 }: {
   planningDay: PlanningDay;
   diners: Diner[];
-  potjes: Potje[];
-  amberModes: ModeOption[];
-  robinModes: ModeOption[];
+  amberModes: PlanMode[];
+  robinModes: PlanMode[];
   selected: boolean;
   onToggleSelect: () => void;
   onViewMeal: (meal: PlanMealWithRecipe) => void;
@@ -56,7 +52,6 @@ export function DayCard({
       who={who}
       meals={list}
       full={full}
-      potjes={potjes}
       diners={diners}
       onViewMeal={onViewMeal}
       onPickVleesje={onPickVleesje}
@@ -105,7 +100,6 @@ function MealSlot({
   who,
   meals,
   full,
-  potjes,
   diners,
   onViewMeal,
   onPickVleesje,
@@ -114,7 +108,6 @@ function MealSlot({
   who: Assignee;
   meals: PlanMealWithRecipe[];
   full: boolean;
-  potjes: Potje[];
   diners: Diner[];
   onViewMeal: (meal: PlanMealWithRecipe) => void;
   onPickVleesje: (meal: PlanMealWithRecipe) => void;
@@ -122,7 +115,7 @@ function MealSlot({
   return (
     <DropZone date={date} assignee={who} className={full ? "" : "h-full"}>
       {meals.length === 0 ? (
-        <AddMealButton dayDate={date} who={who} full={full} potjes={potjes} />
+        <AddMealButton dayDate={date} who={who} full={full} />
       ) : (
         <div className="space-y-1.5">
           {meals.map((m) => (

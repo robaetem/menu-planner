@@ -41,11 +41,15 @@ import { createGroente, deleteGroente, updateGroente } from "./actions";
 export function GroentenView({
   groenten,
   groenteNames,
+  adding,
+  onAddingChange,
 }: {
   groenten: Groente[];
   groenteNames: string[];
+  /** The "new" dialog, opened from the button beside the tab picker. */
+  adding: boolean;
+  onAddingChange: (open: boolean) => void;
 }) {
-  const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Groente | null>(null);
   const [deleting, setDeleting] = React.useState<Groente | null>(null);
   const router = useRouter();
@@ -65,17 +69,6 @@ export function GroentenView({
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Groenten</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Welke groenten liggen er in de diepvries?{groenten.length > 0 && ` · ${groenten.length} ${groenten.length === 1 ? "soort" : "soorten"}`}
-          </p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
-          <Plus className="size-4" /> Nieuwe groente
-        </Button>
-      </div>
 
       {groenten.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
@@ -86,7 +79,7 @@ export function GroentenView({
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             Houd hier zelf bij welke groenten je hebt ingevroren en pas de aantallen handmatig aan.
           </p>
-          <Button className="mt-5" onClick={() => setDialogOpen(true)}>
+          <Button className="mt-5" onClick={() => onAddingChange(true)}>
             <Plus className="size-4" /> Eerste groente toevoegen
           </Button>
         </div>
@@ -122,7 +115,7 @@ export function GroentenView({
         </div>
       )}
 
-      <GroenteDialog open={dialogOpen} onOpenChange={setDialogOpen} groente={null} groenteNames={groenteNames} />
+      <GroenteDialog open={adding} onOpenChange={onAddingChange} groente={null} groenteNames={groenteNames} />
       <GroenteDialog
         open={editing !== null}
         onOpenChange={(open) => !open && setEditing(null)}

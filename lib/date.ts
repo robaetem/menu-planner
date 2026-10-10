@@ -22,6 +22,11 @@ export function formatDayLabel(iso: string): string {
   return cap(format(parseISO(iso), "EEEE dd/MM", { locale: nl }));
 }
 
+/** "vr 5" — for a chart axis */
+export function formatDayTiny(iso: string): string {
+  return format(parseISO(iso), "EEEEEE d", { locale: nl });
+}
+
 /** "vr 5 jun" — compact */
 export function formatDayShort(iso: string): string {
   return format(parseISO(iso), "EEEEEE d MMM", { locale: nl });

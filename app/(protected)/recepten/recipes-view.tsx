@@ -25,6 +25,7 @@ import { TagManagerDialog } from "./tag-manager-dialog";
 import { deleteRecipe } from "./actions";
 import { assignRecipe } from "../planning/actions";
 import { assigneeLabel } from "../planning/config";
+import { PERSON_TEXT } from "@/components/person-badge";
 
 export type AssignTarget = { date: string; who: Assignee };
 
@@ -125,7 +126,9 @@ export function RecipesView({
           </Button>
           <p className="min-w-0 text-sm leading-tight">
             <span className="font-semibold">Kies een gerecht</span> voor{" "}
-            <span className="font-semibold text-primary">{assigneeLabel(assign.who)}</span> op{" "}
+            <span className={cn("font-semibold", assign.who === "both" ? "text-primary" : PERSON_TEXT[assign.who])}>
+              {assigneeLabel(assign.who)}
+            </span> op{" "}
             <span className="font-semibold">{formatDayLabel(assign.date)}</span>
             <span className="block text-xs text-muted-foreground">Klik een recept om het toe te voegen aan de planning.</span>
           </p>
@@ -133,13 +136,8 @@ export function RecipesView({
       )}
 
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Recepten</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {recipes.length} {recipes.length === 1 ? "recept" : "recepten"} in jullie databank
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Recepten</h1>
         {!assign && (
           <div className="flex shrink-0 gap-2">
             <Button variant="outline" onClick={() => setManagingTags(true)}>

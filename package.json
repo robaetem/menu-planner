@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "data:backup": "node scripts/backup-data.mjs",
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:status": "supabase status",
+    "db:pull-recipes": "node scripts/pull-recipes.mjs",
+    "db:reset": "supabase db reset && node scripts/pull-recipes.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -43,6 +48,7 @@
     "eslint": "^8",
     "eslint-config-next": "14.2.8",
     "postcss": "latest",
+    "supabase": "^2.117.0",
     "tailwindcss": "latest",
     "typescript": "^5"
   },

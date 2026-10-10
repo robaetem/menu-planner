@@ -19,6 +19,7 @@ const TABLES = [
   "vleesje_names",
   "groenten",
   "groente_names",
+  "freezer_portions",
 ];
 
 function readEnvFile(path) {
@@ -49,12 +50,12 @@ async function dumpTable(db, table) {
   return rows;
 }
 
-const env = readEnvFile(".env.local");
+const env = readEnvFile(".env.prod.local");
 const url = env.NEXT_PUBLIC_SUPABASE_URL;
 const key = env.SUPABASE_SECRET_KEY;
 
 if (!url || !key) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY in .env.local");
+  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SECRET_KEY in .env.prod.local");
 }
 
 const projectRef = new URL(url).hostname.split(".")[0];

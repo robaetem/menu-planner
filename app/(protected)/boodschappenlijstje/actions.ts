@@ -18,7 +18,7 @@ export async function saveShoppingDoc(
   origins?: unknown,
 ): Promise<void> {
   const db = getDb();
-  const { data: existing } = await db.from("shopping_doc").select("id").limit(1).maybeSingle();
+  const { data: existing } = await db.from("shopping_doc").select("id").order("id").limit(1).maybeSingle();
   const patch = shoppingDocPatch(section, content, new Date().toISOString(), origins);
   if (existing) {
     const { error } = await db.from("shopping_doc").update(patch).eq("id", existing.id);

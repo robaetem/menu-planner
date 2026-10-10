@@ -9,6 +9,7 @@ import * as React from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { formatDayLabel } from "@/lib/date";
 import { sortOrigins, type ShoppingOriginLine } from "@/lib/shopping/origins";
+import { PersonDot, type Person } from "@/components/person-badge";
 
 const WHO: Record<string, string> = { amber: "Amber", robin: "Robin" };
 
@@ -58,7 +59,10 @@ function OriginList({ line }: { line: ShoppingOriginLine }) {
             <span className="min-w-0">
               {o.meal}
               {o.assignee && o.assignee !== "both" && WHO[o.assignee] ? (
-                <span className="text-background/60"> ({WHO[o.assignee]})</span>
+                <span className="ml-1.5 inline-flex items-center gap-1 text-background/70">
+                  <PersonDot who={o.assignee as Person} />
+                  {WHO[o.assignee]}
+                </span>
               ) : null}
               {o.date ? (
                 <span className="block text-background/60">{formatDayLabel(o.date)}</span>

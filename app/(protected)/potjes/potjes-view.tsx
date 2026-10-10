@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, Minus, Trash2, Snowflake } from "lucide-react";
+import { Plus, Minus, Trash2, Snowflake, CalendarCheck, CookingPot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,49 +28,130 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { formatMonthDay } from "@/lib/date";
-import type { Diner, Potje } from "@/lib/types";
-import { createPotje, deletePotje, setPotjeCount } from "./actions";
+import { formatDayShort, formatMonthDay } from "@/lib/date";
+import { isInFreezer, nameKey, readyOn, type Portion, type Who } from "@/lib/freezer/potjes";
+import type { Diner } from "@/lib/types";
+import { PERSON_BADGE, PersonDot } from "@/components/person-badge";
+import { adjustPotje, createPotje, deletePotje } from "./actions";
 
 type Filter = "robin" | "amber" | "samen";
 
+type Group = {
+  key: string;
+  name: string;
+  portions: Portion[];
+  inFreezer: Record<Who, number>;
+  /** Oldest day something of this went in (for the "sinds" label). */
+  since: string | null;
+  /** Still to be cooked, per person. */
+  coming: Record<Who, number>;
+  /** Meals that cook some of this, and meals that eat some of it, soonest first. */
+  cooking: MealRef[];
+  planned: MealRef[];
+};
+
+type MealRef = { mealId: string; on: string; whos: Who[] };
+
+function mealRefs(list: Portion[], meal: (p: Portion) => { id: string | null; on: string | null }): MealRef[] {
+  const byMeal = new Map<string, MealRef>();
+  for (const p of list) {
+    const { id, on } = meal(p);
+    if (!id || !on) continue;
+    const m = byMeal.get(id) ?? { mealId: id, on, whos: [] };
+    if (!m.whos.includes(p.who)) m.whos.push(p.who);
+    byMeal.set(id, m);
+  }
+  return [...byMeal.values()].sort((a, b) => a.on.localeCompare(b.on));
+}
+
+function buildGroups(portions: Portion[], today: string): Group[] {
+  const byName = new Map<string, Portion[]>();
+  for (const p of portions) byName.set(nameKey(p.name), [...(byName.get(nameKey(p.name)) ?? []), p]);
+
+  const groups = [...byName.entries()].map(([key, list]): Group => {
+    const inFreezer = list.filter((p) => isInFreezer(p, today));
+    const notYet = list.filter((p) => !isInFreezer(p, today));
+    const since = inFreezer
+      .map((p) => (p.sourceMealId ? p.cookOn : p.frozenOn))
+      .filter((d): d is string => !!d)
+      .sort()[0] ?? null;
+    return {
+      key,
+      name: list[0].name,
+      portions: list,
+      inFreezer: {
+        robin: inFreezer.filter((p) => p.who === "robin").length,
+        amber: inFreezer.filter((p) => p.who === "amber").length,
+      },
+      since,
+      coming: {
+        robin: notYet.filter((p) => p.who === "robin").length,
+        amber: notYet.filter((p) => p.who === "amber").length,
+      },
+      cooking: mealRefs(notYet, (p) => ({ id: p.sourceMealId, on: p.cookOn })),
+      planned: mealRefs(list, (p) => ({ id: p.eatenByMealId, on: p.eatenOn })),
+    };
+  });
+
+  // What is in the freezer first (oldest first), then what is still to be made.
+  const firstReady = (g: Group) =>
+    g.portions.map((p) => readyOn(p) ?? "").sort()[0] ?? "";
+  return groups.sort((a, b) => {
+    const fa = a.inFreezer.robin + a.inFreezer.amber > 0;
+    const fb = b.inFreezer.robin + b.inFreezer.amber > 0;
+    if (fa !== fb) return fa ? -1 : 1;
+    if (fa) return (a.since ?? "").localeCompare(b.since ?? "") || a.name.localeCompare(b.name, "nl");
+    return firstReady(a).localeCompare(firstReady(b));
+  });
+}
+
 export function PotjesView({
-  potjes,
+  portions,
+  today,
   diners,
   potjeNames,
+  adding,
+  onAddingChange,
 }: {
-  potjes: Potje[];
+  portions: Portion[];
+  today: string;
   diners: Diner[];
   potjeNames: string[];
+  /** The "new" dialog, opened from the button beside the tab picker. */
+  adding: boolean;
+  onAddingChange: (open: boolean) => void;
 }) {
-  const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [deleting, setDeleting] = React.useState<Potje | null>(null);
+  const [deleting, setDeleting] = React.useState<Group | null>(null);
   const [filter, setFilter] = React.useState<Filter | null>(null);
   const router = useRouter();
-  const [, start] = useTransition();
+  const [pending, start] = useTransition();
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
+  const whoLabel = (w: Who) => (w === "robin" ? robinLabel : amberLabel);
 
-  // Badge totals: Robin/Amber are sums of instances; Samen counts the jars that
-  // exist for BOTH (min per potje), so a shared potje is counted in all three.
-  const robinTotal = potjes.reduce((s, p) => s + p.robin_count, 0);
-  const amberTotal = potjes.reduce((s, p) => s + p.amber_count, 0);
-  const samenTotal = potjes.reduce((s, p) => s + Math.min(p.robin_count, p.amber_count), 0);
+  const groups = React.useMemo(() => buildGroups(portions, today), [portions, today]);
 
-  function matches(p: Potje, f: Filter): boolean {
-    if (f === "robin") return p.robin_count > 0;
-    if (f === "amber") return p.amber_count > 0;
-    return p.robin_count > 0 && p.amber_count > 0;
+  // Badge totals count what is in the freezer today; Samen counts the dishes
+  // there is one of for BOTH (min per dish), so a shared dish shows in all three.
+  const robinTotal = groups.reduce((s, g) => s + g.inFreezer.robin, 0);
+  const amberTotal = groups.reduce((s, g) => s + g.inFreezer.amber, 0);
+  const samenTotal = groups.reduce((s, g) => s + Math.min(g.inFreezer.robin, g.inFreezer.amber), 0);
+
+  function matches(g: Group, f: Filter): boolean {
+    if (f === "robin") return g.inFreezer.robin > 0;
+    if (f === "amber") return g.inFreezer.amber > 0;
+    return g.inFreezer.robin > 0 && g.inFreezer.amber > 0;
   }
-  const shown = filter ? potjes.filter((p) => matches(p, filter)) : potjes;
+  const shown = filter ? groups.filter((g) => matches(g, filter)) : groups;
 
-  function run(fn: () => Promise<void>) {
+  function run(fn: () => Promise<unknown>, done?: (result: unknown) => void) {
     start(async () => {
       try {
-        await fn();
+        const result = await fn();
+        done?.(result);
         router.refresh();
       } catch (e) {
-        toast.error("Mislukt.");
+        toast.error(e instanceof Error ? e.message : "Mislukt.");
         console.error(e);
       }
     });
@@ -78,34 +159,25 @@ export function PotjesView({
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Potjes</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Wat ligt er in de diepvries?</p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
-          <Plus className="size-4" /> Nieuw potje
-        </Button>
-      </div>
 
-      {potjes.length > 0 && (
-        <div className="mt-5 flex flex-wrap gap-2">
-          <FilterBadge label={robinLabel} count={robinTotal} active={filter === "robin"} onClick={() => setFilter((f) => (f === "robin" ? null : "robin"))} />
-          <FilterBadge label={amberLabel} count={amberTotal} active={filter === "amber"} onClick={() => setFilter((f) => (f === "amber" ? null : "amber"))} />
+      {groups.length > 0 && (
+        <div className="mt-6 flex flex-wrap gap-2">
+          <FilterBadge who="robin" label={robinLabel} count={robinTotal} active={filter === "robin"} onClick={() => setFilter((f) => (f === "robin" ? null : "robin"))} />
+          <FilterBadge who="amber" label={amberLabel} count={amberTotal} active={filter === "amber"} onClick={() => setFilter((f) => (f === "amber" ? null : "amber"))} />
           <FilterBadge label="Samen" count={samenTotal} active={filter === "samen"} onClick={() => setFilter((f) => (f === "samen" ? null : "samen"))} />
         </div>
       )}
 
-      {potjes.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
           <div className="flex size-14 items-center justify-center rounded-2xl bg-sky-100 text-sky-600 dark:bg-sky-950/50 dark:text-sky-300">
             <Snowflake className="size-7" />
           </div>
           <h3 className="mt-4 text-lg font-semibold">De diepvries is leeg</h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Voeg een potje toe telkens je een portie invriest. Daarna kan je het inplannen.
+            Plan bij een gerecht extra potjes in, of voeg hier toe wat al in de diepvries ligt.
           </p>
-          <Button className="mt-5" onClick={() => setDialogOpen(true)}>
+          <Button className="mt-5" onClick={() => onAddingChange(true)}>
             <Plus className="size-4" /> Eerste potje toevoegen
           </Button>
         </div>
@@ -114,42 +186,85 @@ export function PotjesView({
           Geen potjes voor deze filter.
         </div>
       ) : (
-        <div className="mt-6 space-y-3">
-          {shown.map((p) => (
-            <div key={p.id} className="flex items-start justify-between gap-3 rounded-xl border bg-card p-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-                  <p className="font-medium">{p.name}</p>
-                  <span className="text-xs text-muted-foreground">{formatMonthDay(p.created_at)}</span>
+        <div className="mt-4 space-y-3">
+          {shown.map((g) => (
+            <div key={g.key} data-potje-group={g.name} className="rounded-xl border bg-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                    <p className="font-medium">{g.name}</p>
+                    {g.since && <span className="text-xs text-muted-foreground">sinds {formatMonthDay(g.since)}</span>}
+                  </div>
+                  {g.inFreezer.robin + g.inFreezer.amber === 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(["robin", "amber"] as Who[]).map((w) => (
+                        <span
+                          key={w}
+                          className={cn(
+                            "inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-medium",
+                            g.coming[w] > 0 ? PERSON_BADGE[w] : "border-dashed text-muted-foreground",
+                          )}
+                        >
+                          {whoLabel(w)} {g.coming[w]}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(["robin", "amber"] as Who[]).map((w) => (
+                      <CountPill
+                        key={w}
+                        who={w}
+                        label={whoLabel(w)}
+                        value={g.inFreezer[w]}
+                        pending={pending}
+                        onAdd={() => run(() => adjustPotje(g.name, w, 1))}
+                        onRemove={() => run(() => adjustPotje(g.name, w, -1))}
+                      />
+                    ))}
+                  </div>
+                  )}
+                  {g.cooking.length + g.planned.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {g.cooking.map((m) => (
+                        <span
+                          key={`cook-${m.mealId}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                        >
+                          <CookingPot className="size-3" />
+                          Wordt gemaakt {formatDayShort(m.on)} ·
+                          <WhoTag whos={m.whos} label={whoLabel} />
+                        </span>
+                      ))}
+                      {g.planned.map((m) => (
+                        <span
+                          key={m.mealId}
+                          className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        >
+                          <CalendarCheck className="size-3" />
+                          Ingepland {formatDayShort(m.on)} ·
+                          <WhoTag whos={m.whos} label={whoLabel} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <CountPill
-                    label={robinLabel}
-                    value={p.robin_count}
-                    onChange={(v) => run(() => setPotjeCount(p.id, "robin", v))}
-                  />
-                  <CountPill
-                    label={amberLabel}
-                    value={p.amber_count}
-                    onChange={(v) => run(() => setPotjeCount(p.id, "amber", v))}
-                  />
-                </div>
+                <button
+                  onClick={() => setDeleting(g)}
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+                  aria-label={`${g.name} verwijderen`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
               </div>
-              <button
-                onClick={() => setDeleting(p)}
-                className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
-                aria-label={`${p.name} verwijderen`}
-              >
-                <Trash2 className="size-4" />
-              </button>
             </div>
           ))}
         </div>
       )}
 
       <NewPotjeDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        open={adding}
+        onOpenChange={onAddingChange}
         robinLabel={robinLabel}
         amberLabel={amberLabel}
         potjeNames={potjeNames}
@@ -159,7 +274,10 @@ export function PotjesView({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Potje verwijderen?</AlertDialogTitle>
-            <AlertDialogDescription>“{deleting?.name}” wordt uit de diepvries verwijderd.</AlertDialogDescription>
+            <AlertDialogDescription>
+              “{deleting?.name}” wordt uit de diepvries verwijderd. Potjes die al ingepland zijn of nog gemaakt
+              moeten worden, blijven staan.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Annuleren</AlertDialogCancel>
@@ -167,9 +285,17 @@ export function PotjesView({
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(e) => {
                 e.preventDefault();
-                const p = deleting;
+                const g = deleting;
                 setDeleting(null);
-                if (p) run(() => deletePotje(p.id));
+                if (g)
+                  run(
+                    () => deletePotje(g.name),
+                    (kept) => {
+                      if (typeof kept === "number" && kept > 0) {
+                        toast.info(`${kept} ${kept === 1 ? "ingepland potje blijft" : "ingeplande potjes blijven"} staan.`);
+                      }
+                    },
+                  );
               }}
             >
               Verwijderen
@@ -181,12 +307,26 @@ export function PotjesView({
   );
 }
 
+/** Who a planned/cooking line is for: a dot per person, then the name (or Samen). */
+function WhoTag({ whos, label }: { whos: Who[]; label: (w: Who) => string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {[...whos].sort().map((w) => (
+        <PersonDot key={w} who={w} className="size-1.5" />
+      ))}
+      {whos.length === 2 ? "Samen" : label(whos[0])}
+    </span>
+  );
+}
+
 function FilterBadge({
+  who,
   label,
   count,
   active,
   onClick,
 }: {
+  who?: Who;
   label: string;
   count: number;
   active: boolean;
@@ -200,24 +340,34 @@ function FilterBadge({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
         active
-          ? "border-primary bg-primary text-primary-foreground"
+          ? who
+            ? cn(PERSON_BADGE[who], "border-current")
+            : "border-primary bg-primary text-primary-foreground"
           : "border-border bg-card text-foreground hover:border-primary/40",
       )}
     >
+      {who && <PersonDot who={who} />}
       {label}
-      <span className={cn("tabular-nums", active ? "text-primary-foreground/90" : "text-muted-foreground")}>{count}</span>
+      <span className={cn("tabular-nums", active ? "opacity-80" : "text-muted-foreground")}>{count}</span>
     </button>
   );
 }
 
+/** In-the-freezer count for one person, with +/- for hand corrections. */
 function CountPill({
+  who,
   label,
   value,
-  onChange,
+  pending,
+  onAdd,
+  onRemove,
 }: {
+  who: Who;
   label: string;
   value: number;
-  onChange: (v: number) => void;
+  pending: boolean;
+  onAdd: () => void;
+  onRemove: () => void;
 }) {
   return (
     <Popover>
@@ -226,7 +376,7 @@ function CountPill({
           <button
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-              value > 0 ? "border-border bg-background" : "border-dashed border-border text-muted-foreground",
+              value > 0 ? PERSON_BADGE[who] : "border-dashed border-border text-muted-foreground",
             )}
           />
         }
@@ -235,15 +385,15 @@ function CountPill({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-2.5">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon-sm" onClick={() => onChange(Math.max(0, value - 1))} disabled={value <= 0} aria-label="Minder">
+          <Button variant="outline" size="icon-sm" onClick={onRemove} disabled={value <= 0 || pending} aria-label="Minder">
             <Minus className="size-3.5" />
           </Button>
           <span className="min-w-8 text-center text-sm font-medium tabular-nums">{value}</span>
-          <Button variant="outline" size="icon-sm" onClick={() => onChange(value + 1)} aria-label="Meer">
+          <Button variant="outline" size="icon-sm" onClick={onAdd} disabled={pending} aria-label="Meer">
             <Plus className="size-3.5" />
           </Button>
         </div>
-        <p className="mt-1.5 text-center text-xs text-muted-foreground">potjes voor {label}</p>
+        <p className="mt-1.5 text-center text-xs text-muted-foreground">in de diepvries voor {label}</p>
       </PopoverContent>
     </Popover>
   );

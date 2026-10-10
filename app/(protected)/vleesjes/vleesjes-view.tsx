@@ -32,13 +32,17 @@ import type { Vleesje } from "@/lib/types";
 import { createVleesje, deleteVleesje, setVleesjeCount } from "./actions";
 
 export function VleesjesView({
-  vleesjes,
+  vleesjes: allVleesjes,
   vleesjeNames,
+  adding,
+  onAddingChange,
 }: {
   vleesjes: Vleesje[];
   vleesjeNames: string[];
+  /** The "new" dialog, opened from the button beside the tab picker. */
+  adding: boolean;
+  onAddingChange: (open: boolean) => void;
 }) {
-  const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState<Vleesje | null>(null);
   const router = useRouter();
   const [, start] = useTransition();
@@ -55,21 +59,13 @@ export function VleesjesView({
     });
   }
 
+  // A batch at 0 is out of the freezer. Its row stays so a meal that gets
+  // unplanned can put its vleesjes back onto it, but it isn't listed.
+  const vleesjes = allVleesjes.filter((v) => v.count > 0);
   const total = vleesjes.reduce((s, v) => s + v.count, 0);
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Vleesjes</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Welk vlees ligt er in de diepvries?{total > 0 && ` · ${total} in voorraad`}
-          </p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
-          <Plus className="size-4" /> Nieuw vleesje
-        </Button>
-      </div>
 
       {vleesjes.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
@@ -80,7 +76,7 @@ export function VleesjesView({
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             Voeg een vleesje toe telkens je vlees invriest. Daarna kan je het kiezen bij het plannen.
           </p>
-          <Button className="mt-5" onClick={() => setDialogOpen(true)}>
+          <Button className="mt-5" onClick={() => onAddingChange(true)}>
             <Plus className="size-4" /> Eerste vleesje toevoegen
           </Button>
         </div>
@@ -109,7 +105,7 @@ export function VleesjesView({
         </div>
       )}
 
-      <NewVleesjeDialog open={dialogOpen} onOpenChange={setDialogOpen} vleesjeNames={vleesjeNames} />
+      <NewVleesjeDialog open={adding} onOpenChange={onAddingChange} vleesjeNames={vleesjeNames} />
 
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
