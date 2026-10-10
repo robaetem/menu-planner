@@ -25,7 +25,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { PlanMode } from "@/lib/types";
-import { PERSON_BADGE, PersonDot } from "@/components/person-badge";
 import { DEFAULT_MODE } from "./config";
 import { setMode } from "./actions";
 import { createMode, deleteMode, updateMode } from "./mode-actions";
@@ -74,16 +73,15 @@ export function ModePill({
           render={
             <button
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+                "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
                 active
-                  ? PERSON_BADGE[who]
+                  ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-muted/40 text-muted-foreground hover:text-foreground",
                 pending && "opacity-60",
               )}
             />
           }
         >
-          <PersonDot who={who} className="size-1.5" />
           <span>
             {label}: {display}
           </span>

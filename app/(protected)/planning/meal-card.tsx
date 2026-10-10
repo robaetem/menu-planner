@@ -11,15 +11,14 @@ import { cn } from "@/lib/utils";
 import type { Diner, PlanMealWithRecipe } from "@/lib/types";
 import { formatDayShort } from "@/lib/date";
 import type { Portion, Who } from "@/lib/freezer/potjes";
-import { PersonBadge, PersonDot } from "@/components/person-badge";
 import { deleteMeal, setMealFreezer } from "./actions";
 import { useFreezer } from "./freezer-context";
 import { isVleesjeTemplate, vleesjeSummary } from "./config";
 import { useMealDrag } from "./meal-drag";
 
-function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): { who: Who; label: string }[] {
-  const keys: Who[] = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
-  return keys.map((k) => ({ who: k, label: diners.find((d) => d.key === k)?.label ?? k }));
+function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
+  const keys = meal.assignee === "both" ? ["amber", "robin"] : [meal.assignee];
+  return keys.map((k) => diners.find((d) => d.key === k)?.label ?? k);
 }
 
 export function MealCard({
@@ -113,10 +112,13 @@ export function MealCard({
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {dinerLabels(meal, diners).map((d) => (
-          <PersonBadge key={d.who} who={d.who}>
-            {d.label}
-          </PersonBadge>
+        {dinerLabels(meal, diners).map((l) => (
+          <span
+            key={l}
+            className="rounded-full border border-foreground/15 bg-background/60 px-2 py-0.5 text-xs font-medium"
+          >
+            {l}
+          </span>
         ))}
         {origin && (
           <span className="inline-flex items-center gap-1 rounded-full border border-sky-300/70 bg-background/60 px-2 py-0.5 text-xs text-sky-800 dark:border-sky-900 dark:text-sky-300">
@@ -257,7 +259,6 @@ function PotjesControl({
         <p className="mb-2.5 text-sm font-medium">Extra porties invriezen</p>
         <div className="space-y-3">
           <PotjeRow
-            who="robin"
             label={robinLabel}
             value={r}
             planned={plannedFor("robin").map((p) => p.eatenOn ?? "")}
@@ -265,7 +266,6 @@ function PotjesControl({
             onChange={(n) => onChange(n, a)}
           />
           <PotjeRow
-            who="amber"
             label={amberLabel}
             value={a}
             planned={plannedFor("amber").map((p) => p.eatenOn ?? "")}
@@ -285,9 +285,7 @@ function PotjeRow({
   planned,
   pending,
   onChange,
-  who,
 }: {
-  who: Who;
   label: string;
   value: number;
   /** Days that already plan to eat a portion of this — can't go below. */
@@ -298,10 +296,7 @@ function PotjeRow({
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-2 text-sm font-medium">
-          <PersonDot who={who} />
-          {label}
-        </span>
+        <span className="text-sm font-medium">{label}</span>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"

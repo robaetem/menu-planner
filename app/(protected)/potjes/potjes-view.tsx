@@ -31,7 +31,6 @@ import { cn } from "@/lib/utils";
 import { formatDayShort, formatMonthDay } from "@/lib/date";
 import { isInFreezer, nameKey, readyOn, type Portion, type Who } from "@/lib/freezer/potjes";
 import type { Diner } from "@/lib/types";
-import { PERSON_BADGE, PersonDot } from "@/components/person-badge";
 import { adjustPotje, createPotje, deletePotje } from "./actions";
 
 type Filter = "robin" | "amber" | "samen";
@@ -162,8 +161,8 @@ export function PotjesView({
 
       {groups.length > 0 && (
         <div className="mt-6 flex flex-wrap gap-2">
-          <FilterBadge who="robin" label={robinLabel} count={robinTotal} active={filter === "robin"} onClick={() => setFilter((f) => (f === "robin" ? null : "robin"))} />
-          <FilterBadge who="amber" label={amberLabel} count={amberTotal} active={filter === "amber"} onClick={() => setFilter((f) => (f === "amber" ? null : "amber"))} />
+          <FilterBadge label={robinLabel} count={robinTotal} active={filter === "robin"} onClick={() => setFilter((f) => (f === "robin" ? null : "robin"))} />
+          <FilterBadge label={amberLabel} count={amberTotal} active={filter === "amber"} onClick={() => setFilter((f) => (f === "amber" ? null : "amber"))} />
           <FilterBadge label="Samen" count={samenTotal} active={filter === "samen"} onClick={() => setFilter((f) => (f === "samen" ? null : "samen"))} />
         </div>
       )}
@@ -202,7 +201,7 @@ export function PotjesView({
                           key={w}
                           className={cn(
                             "inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-medium",
-                            g.coming[w] > 0 ? PERSON_BADGE[w] : "border-dashed text-muted-foreground",
+                            g.coming[w] > 0 ? "border-border bg-background" : "border-dashed text-muted-foreground",
                           )}
                         >
                           {whoLabel(w)} {g.coming[w]}
@@ -214,7 +213,6 @@ export function PotjesView({
                     {(["robin", "amber"] as Who[]).map((w) => (
                       <CountPill
                         key={w}
-                        who={w}
                         label={whoLabel(w)}
                         value={g.inFreezer[w]}
                         pending={pending}
@@ -232,8 +230,8 @@ export function PotjesView({
                           className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                         >
                           <CookingPot className="size-3" />
-                          Wordt gemaakt {formatDayShort(m.on)} ·
-                          <WhoTag whos={m.whos} label={whoLabel} />
+                          Wordt gemaakt {formatDayShort(m.on)} ·{" "}
+                          {m.whos.length === 2 ? "Samen" : whoLabel(m.whos[0])}
                         </span>
                       ))}
                       {g.planned.map((m) => (
@@ -242,8 +240,8 @@ export function PotjesView({
                           className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
                         >
                           <CalendarCheck className="size-3" />
-                          Ingepland {formatDayShort(m.on)} ·
-                          <WhoTag whos={m.whos} label={whoLabel} />
+                          Ingepland {formatDayShort(m.on)} ·{" "}
+                          {m.whos.length === 2 ? "Samen" : whoLabel(m.whos[0])}
                         </span>
                       ))}
                     </div>
@@ -307,26 +305,12 @@ export function PotjesView({
   );
 }
 
-/** Who a planned/cooking line is for: a dot per person, then the name (or Samen). */
-function WhoTag({ whos, label }: { whos: Who[]; label: (w: Who) => string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      {[...whos].sort().map((w) => (
-        <PersonDot key={w} who={w} className="size-1.5" />
-      ))}
-      {whos.length === 2 ? "Samen" : label(whos[0])}
-    </span>
-  );
-}
-
 function FilterBadge({
-  who,
   label,
   count,
   active,
   onClick,
 }: {
-  who?: Who;
   label: string;
   count: number;
   active: boolean;
@@ -340,29 +324,24 @@ function FilterBadge({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
         active
-          ? who
-            ? cn(PERSON_BADGE[who], "border-current")
-            : "border-primary bg-primary text-primary-foreground"
+          ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-card text-foreground hover:border-primary/40",
       )}
     >
-      {who && <PersonDot who={who} />}
       {label}
-      <span className={cn("tabular-nums", active ? "opacity-80" : "text-muted-foreground")}>{count}</span>
+      <span className={cn("tabular-nums", active ? "text-primary-foreground/90" : "text-muted-foreground")}>{count}</span>
     </button>
   );
 }
 
 /** In-the-freezer count for one person, with +/- for hand corrections. */
 function CountPill({
-  who,
   label,
   value,
   pending,
   onAdd,
   onRemove,
 }: {
-  who: Who;
   label: string;
   value: number;
   pending: boolean;
@@ -376,7 +355,7 @@ function CountPill({
           <button
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-              value > 0 ? PERSON_BADGE[who] : "border-dashed border-border text-muted-foreground",
+              value > 0 ? "border-border bg-background" : "border-dashed border-border text-muted-foreground",
             )}
           />
         }

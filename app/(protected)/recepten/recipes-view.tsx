@@ -25,7 +25,6 @@ import { TagManagerDialog } from "./tag-manager-dialog";
 import { deleteRecipe } from "./actions";
 import { assignRecipe } from "../planning/actions";
 import { assigneeLabel } from "../planning/config";
-import { PERSON_TEXT } from "@/components/person-badge";
 
 export type AssignTarget = { date: string; who: Assignee };
 
@@ -126,9 +125,7 @@ export function RecipesView({
           </Button>
           <p className="min-w-0 text-sm leading-tight">
             <span className="font-semibold">Kies een gerecht</span> voor{" "}
-            <span className={cn("font-semibold", assign.who === "both" ? "text-primary" : PERSON_TEXT[assign.who])}>
-              {assigneeLabel(assign.who)}
-            </span> op{" "}
+            <span className="font-semibold text-primary">{assigneeLabel(assign.who)}</span> op{" "}
             <span className="font-semibold">{formatDayLabel(assign.date)}</span>
             <span className="block text-xs text-muted-foreground">Klik een recept om het toe te voegen aan de planning.</span>
           </p>

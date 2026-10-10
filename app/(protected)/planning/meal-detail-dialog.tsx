@@ -16,7 +16,6 @@ import type { Diner, PlanMealWithRecipe, RecipeWithIngredients } from "@/lib/typ
 import { addIsoDays, formatDayShort, formatMonthDay } from "@/lib/date";
 import { isInFreezer, type Portion } from "@/lib/freezer/potjes";
 import { useFreezer } from "./freezer-context";
-import { PersonBadge } from "@/components/person-badge";
 
 export function MealDetailDialog({
   meal,
@@ -44,6 +43,10 @@ export function MealDetailDialog({
   const who = meal.assignee;
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
+  const whoLabel =
+    who === "both"
+      ? `${robinLabel} & ${amberLabel}`
+      : diners.find((d) => d.key === who)?.label ?? assigneeLabel(who);
 
   const freezerRobin = meal.freezer_robin || 0;
   const freezerAmber = meal.freezer_amber || 0;
@@ -63,12 +66,7 @@ export function MealDetailDialog({
           <DialogDescription className="sr-only">Details voor {title}</DialogDescription>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              {who === "both" ? <Users className="size-4" /> : <User className="size-4" />}
-              {(who === "both" ? (["amber", "robin"] as const) : [who]).map((w) => (
-                <PersonBadge key={w} who={w}>
-                  {w === "robin" ? robinLabel : amberLabel}
-                </PersonBadge>
-              ))}
+              {who === "both" ? <Users className="size-4" /> : <User className="size-4" />} {whoLabel}
             </span>
             {meal.from_freezer && (
               <span className="inline-flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
@@ -227,7 +225,7 @@ function PortionSection({
       <ul className="divide-y rounded-lg border">
         {sorted.map((p) => (
           <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3.5 py-2 text-sm">
-            <PersonBadge who={p.who}>{p.who === "robin" ? robinLabel : amberLabel}</PersonBadge>
+            <span className="font-medium">{p.who === "robin" ? robinLabel : amberLabel}</span>
             <span className="text-xs text-muted-foreground">{status(p)}</span>
           </li>
         ))}

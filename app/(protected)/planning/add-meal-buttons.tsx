@@ -23,7 +23,6 @@ import { blockedPotjes, potjeChoices, type BlockedPotje, type PotjeChoice } from
 import { planPotje } from "./actions";
 import { assigneeLabel } from "./config";
 import { useFreezer } from "./freezer-context";
-import { PersonBadge } from "@/components/person-badge";
 
 export function AddMealButton({
   dayDate,
@@ -83,12 +82,7 @@ export function AddMealButton({
           <button
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "flex items-center justify-center gap-1.5 rounded-lg border border-dashed bg-card/40 text-sm font-medium transition-colors",
-              who === "both"
-                ? "border-border text-muted-foreground hover:border-primary/40 hover:bg-accent/40 hover:text-foreground"
-                : who === "robin"
-                  ? "border-robin/35 text-robin-ink hover:border-robin/60 hover:bg-robin-soft"
-                  : "border-amber/35 text-amber-ink hover:border-amber/60 hover:bg-amber-soft",
+              "flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-card/40 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground",
               full ? "w-full py-3.5" : "h-full min-h-[4.25rem] w-full",
               pending && "opacity-60",
             )}
@@ -189,10 +183,10 @@ function BlockedItem({ group }: { group: BlockedGroup }) {
       {group.rows.map((r) => (
         <span key={r.text} className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
           {r.whos.map((w) => (
-            <PersonBadge key={w.who} who={w.who} className="px-1.5 py-px">
+            <span key={w.who} className="rounded-full border px-1.5 py-px font-medium text-foreground/80">
               {w.who === "robin" ? "Robin" : "Amber"}
-              {w.count > 1 && <span className="ml-1 tabular-nums opacity-70">{w.count}×</span>}
-            </PersonBadge>
+              {w.count > 1 && <span className="ml-1 tabular-nums text-muted-foreground">{w.count}×</span>}
+            </span>
           ))}
           <span>{r.text}</span>
         </span>

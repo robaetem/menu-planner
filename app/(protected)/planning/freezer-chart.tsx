@@ -9,6 +9,9 @@ import { useFreezer } from "./freezer-context";
 
 const WHOS: Who[] = ["robin", "amber"];
 
+/** Series colours (validated as a pair, light and dark). */
+const SERIES = "[--robin:#2a78d6] [--amber:#eb6834] dark:[--robin:#3987e5] dark:[--amber:#d95926]";
+
 const COL = 56; // min px per day
 const UNIT = 22; // px per potje, so every count gets its own gridline
 const PAD = { top: 18, right: 28, bottom: 26, left: 30 };
@@ -69,7 +72,7 @@ export function FreezerChart({
   const activeDay = active !== null ? timeline.days[active] : null;
 
   return (
-    <section className="rounded-xl border bg-card p-4" aria-label="Potjesverloop">
+    <section className={cn("rounded-xl border bg-card p-4", SERIES)} aria-label="Potjesverloop">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-sm font-semibold tracking-tight">Potjesverloop</h2>
         <button
