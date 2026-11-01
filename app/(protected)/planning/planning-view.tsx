@@ -18,13 +18,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, RecipeWithIngredients, Vleesje } from "@/lib/types";
+import type { Diner, PlanMealWithRecipe, PlanMode, PlanningDay, RecipeWithIngredients } from "@/lib/types";
 import type { Portion } from "@/lib/freezer/potjes";
+import type { FreezerStock } from "@/lib/freezer/stock";
 import { FreezerProvider } from "./freezer-context";
 import { DayCard } from "./day-card";
 import { MealDetailDialog } from "./meal-detail-dialog";
 import { FreezerChart } from "./freezer-chart";
 import { VleesjePickerDialog } from "./vleesje-picker-dialog";
+import { GroentePickerDialog } from "./groente-picker-dialog";
 import { MealDragProvider, type DropTarget } from "./meal-drag";
 import { extendDays, moveMeal } from "./actions";
 import { assigneeLabel } from "./config";
@@ -37,14 +39,12 @@ export function PlanningView({
   diners,
   freezer,
   modes,
-  vleesjes,
 }: {
   days: PlanningDay[];
   recipes: RecipeWithIngredients[];
   diners: Diner[];
-  freezer: { portions: Portion[]; today: string };
+  freezer: { portions: Portion[]; today: string; vleesjes: FreezerStock; groenten: FreezerStock };
   modes: PlanMode[];
-  vleesjes: Vleesje[];
 }) {
   const router = useRouter();
   const [extending, startExtend] = useTransition();
@@ -54,6 +54,7 @@ export function PlanningView({
   const [showChart, setShowChart] = useStoredFlag("planning.freezerChart");
   const [viewing, setViewing] = React.useState<PlanMealWithRecipe | null>(null);
   const [picking, setPicking] = React.useState<PlanMealWithRecipe | null>(null);
+  const [pickingGroente, setPickingGroente] = React.useState<PlanMealWithRecipe | null>(null);
 
   const amberLabel = diners.find((d) => d.key === "amber")?.label ?? "Amber";
   const robinLabel = diners.find((d) => d.key === "robin")?.label ?? "Robin";
@@ -164,6 +165,7 @@ export function PlanningView({
               onToggleSelect={() => toggle(d.day_date)}
               onViewMeal={(m) => setViewing(m)}
               onPickVleesje={(m) => setPicking(m)}
+              onPickGroente={(m) => setPickingGroente(m)}
             />
           ))}
         </div>
@@ -209,14 +211,25 @@ export function PlanningView({
           setViewing(null);
           if (m) setPicking(m);
         }}
+        onPickGroente={() => {
+          const m = viewing;
+          setViewing(null);
+          if (m) setPickingGroente(m);
+        }}
       />
 
       <VleesjePickerDialog
         meal={picking}
         recipeTitle={picking?.recipe?.title ?? picking?.freeform_title ?? "Gerecht"}
-        vleesjes={vleesjes}
         open={picking !== null}
         onOpenChange={(o) => !o && setPicking(null)}
+      />
+
+      <GroentePickerDialog
+        meal={pickingGroente}
+        recipe={pickingGroente?.recipe_id ? recipes.find((r) => r.id === pickingGroente.recipe_id) ?? null : null}
+        open={pickingGroente !== null}
+        onOpenChange={(o) => !o && setPickingGroente(null)}
       />
     </div>
     </FreezerProvider>

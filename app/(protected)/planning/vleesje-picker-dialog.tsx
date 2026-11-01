@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Minus, X, Snowflake, ShoppingCart, Beef } from "lucide-react";
+import { Snowflake, ShoppingCart, Beef } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,23 +14,21 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import type { PlanMealWithRecipe, TemplateVleesje, Vleesje } from "@/lib/types";
+import type { PlanMealWithRecipe, TemplateVleesje } from "@/lib/types";
+import { stockKey } from "@/lib/freezer/stock";
 import { parseBuyText } from "@/lib/shopping/buy-lines";
 import { setMealVleesjes } from "./actions";
-
-type Stock = { name: string; count: number };
+import { useFreezer } from "./freezer-context";
+import { ChosenLine, findOption, leftOf, StockChips, useStockOptions, type StockOption } from "./stock-picker";
 
 export function VleesjePickerDialog({
   meal,
   recipeTitle,
-  vleesjes,
   open,
   onOpenChange,
 }: {
   meal: PlanMealWithRecipe | null;
   recipeTitle: string;
-  vleesjes: Vleesje[];
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
@@ -39,22 +37,9 @@ export function VleesjePickerDialog({
   const [buyText, setBuyText] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
-  // What this meal could take from the freezer, per name. The same vleesje can
-  // sit in the freezer as several batches (one row per freeze date); the picker
-  // reserves by name, so it counts them together. What this meal already
-  // reserved is out of the inventory but goes back in when it saves, so it
-  // counts as stock here.
-  const stock = React.useMemo(() => {
-    const m = new Map<string, Stock>();
-    const add = (name: string, count: number) => {
-      const key = name.toLowerCase();
-      const prev = m.get(key);
-      m.set(key, { name: prev?.name ?? name, count: (prev?.count ?? 0) + count });
-    };
-    for (const v of vleesjes) add(v.name, v.count);
-    for (const v of meal?.template_vleesjes ?? []) if (v.source === "freezer") add(v.name, v.count);
-    return [...m.values()];
-  }, [vleesjes, meal]);
+  // What this meal can take from the freezer, per name: every batch of that
+  // name minus what other meals reserved. Its own reservations count as free.
+  const options = useStockOptions(useFreezer().vleesjes, meal?.id ?? null);
 
   React.useEffect(() => {
     if (open) {
@@ -63,26 +48,21 @@ export function VleesjePickerDialog({
     }
   }, [open, meal]);
 
-  // How many of a freezer vleesje are still free to reserve (inventory minus what
-  // this selection already takes).
   function freezerSelected(name: string): number {
-    const key = name.toLowerCase();
-    return lines.filter((l) => l.source === "freezer" && l.name.toLowerCase() === key).reduce((s, l) => s + l.count, 0);
-  }
-  function available(v: Stock): number {
-    return Math.max(0, v.count - freezerSelected(v.name));
+    const key = stockKey(name);
+    return lines.filter((l) => l.source === "freezer" && stockKey(l.name) === key).reduce((sum, l) => sum + l.count, 0);
   }
 
-  function addFreezer(v: Stock) {
-    if (available(v) <= 0) return;
+  function addFreezer(o: StockOption) {
+    if (leftOf(o, freezerSelected(o.name)) <= 0) return;
     setLines((prev) => {
-      const i = prev.findIndex((l) => l.source === "freezer" && l.name.toLowerCase() === v.name.toLowerCase());
+      const i = prev.findIndex((l) => l.source === "freezer" && stockKey(l.name) === o.key);
       if (i >= 0) {
         const next = [...prev];
         next[i] = { ...next[i], count: next[i].count + 1 };
         return next;
       }
-      return [...prev, { name: v.name, count: 1, source: "freezer" }];
+      return [...prev, { name: o.name, count: 1, source: "freezer" }];
     });
   }
 
@@ -102,18 +82,17 @@ export function VleesjePickerDialog({
     setBuyText("");
   }
 
-  function setCount(idx: number, count: number) {
+  function step(idx: number, direction: 1 | -1) {
     setLines((prev) => {
+      const line = prev[idx];
+      const count = line.count + direction;
       if (count <= 0) return prev.filter((_, i) => i !== idx);
-      const next = [...prev];
-      // Don't let a freezer line exceed what's in stock.
-      if (next[idx].source === "freezer") {
-        const inv = stock.find((v) => v.name.toLowerCase() === next[idx].name.toLowerCase());
-        const otherSel = freezerSelected(next[idx].name) - next[idx].count;
-        const max = inv ? Math.max(0, inv.count - otherSel) : count;
-        count = Math.min(count, max);
+      // A freezer line can't take more than is free.
+      if (direction > 0 && line.source === "freezer" && leftOf(findOption(options, line.name), freezerSelected(line.name)) <= 0) {
+        return prev;
       }
-      next[idx] = { ...next[idx], count };
+      const next = [...prev];
+      next[idx] = { ...line, count };
       return next;
     });
   }
@@ -127,13 +106,11 @@ export function VleesjePickerDialog({
         onOpenChange(false);
       })
       .catch((e) => {
-        toast.error("Opslaan mislukt.");
+        toast.error(e instanceof Error && e.message ? e.message : "Opslaan mislukt.");
         console.error(e);
       })
       .finally(() => setSaving(false));
   }
-
-  const availableInv = stock.filter((v) => v.count > 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
@@ -155,35 +132,30 @@ export function VleesjePickerDialog({
               </p>
             ) : (
               <ul className="space-y-2">
-                {lines.map((l, i) => (
-                  <li key={`${l.source}-${l.name}-${i}`} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
-                    {l.source === "freezer" ? (
-                      <Snowflake className="size-4 shrink-0 text-sky-500" />
-                    ) : (
-                      <ShoppingCart className="size-4 shrink-0 text-amber-600" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{l.name}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {l.source === "freezer" ? "diepvries" : "te kopen"}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button variant="outline" size="icon-sm" onClick={() => setCount(i, l.count - 1)} aria-label="Minder">
-                        <Minus className="size-3.5" />
-                      </Button>
-                      <span className="min-w-6 text-center text-sm font-medium tabular-nums">{l.count}</span>
-                      <Button variant="outline" size="icon-sm" onClick={() => setCount(i, l.count + 1)} aria-label="Meer">
-                        <Plus className="size-3.5" />
-                      </Button>
-                    </div>
-                    <button
-                      onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
-                      aria-label="Verwijderen"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </li>
-                ))}
+                {lines.map((l, i) => {
+                  const freezer = l.source === "freezer";
+                  const option = freezer ? findOption(options, l.name) : undefined;
+                  const short = freezer ? Math.max(0, l.count - (option?.free ?? 0)) : 0;
+                  return (
+                    <ChosenLine
+                      key={`${l.source}-${l.name}-${i}`}
+                      icon={
+                        freezer ? (
+                          <Snowflake className="size-4 shrink-0 text-sky-500" />
+                        ) : (
+                          <ShoppingCart className="size-4 shrink-0 text-amber-600" />
+                        )
+                      }
+                      name={l.name}
+                      label={freezer ? "diepvries" : "te kopen"}
+                      amount={String(l.count)}
+                      canIncrease={!freezer || leftOf(option, freezerSelected(l.name)) > 0}
+                      short={short}
+                      onStep={(d) => step(i, d)}
+                      onRemove={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                    />
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -193,32 +165,13 @@ export function VleesjePickerDialog({
             <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold tracking-tight">
               <Snowflake className="size-3.5 text-sky-500" /> Uit de diepvries
             </h4>
-            {availableInv.length === 0 ? (
-              <p className="px-1 text-sm text-muted-foreground">Geen vleesjes in voorraad.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {availableInv.map((v) => {
-                  const left = available(v);
-                  return (
-                    <button
-                      key={v.name}
-                      type="button"
-                      disabled={left <= 0}
-                      onClick={() => addFreezer(v)}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-                        left > 0
-                          ? "border-border bg-card hover:border-sky-400"
-                          : "cursor-not-allowed border-dashed text-muted-foreground opacity-60",
-                      )}
-                    >
-                      {v.name}
-                      <span className="text-xs text-muted-foreground tabular-nums">{left}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <StockChips
+              options={options}
+              selectedOf={(o) => freezerSelected(o.name)}
+              format={(_, left) => String(left)}
+              onAdd={addFreezer}
+              empty="Geen vleesjes in de diepvries."
+            />
           </section>
 
           {/* To buy */}

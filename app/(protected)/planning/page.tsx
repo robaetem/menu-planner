@@ -4,7 +4,7 @@ import {
   listModes,
   listPortions,
   listRecipes,
-  listVleesjes,
+  listFreezerStock,
 } from "@/lib/data";
 import { todayIso } from "@/lib/date";
 import { PlanningView } from "./planning-view";
@@ -12,22 +12,21 @@ import { PlanningView } from "./planning-view";
 export const dynamic = "force-dynamic";
 
 export default async function PlanningPage() {
-  const [{ days }, recipes, household, portions, modes, vleesjes] = await Promise.all([
+  const [{ days }, recipes, household, portions, modes, stock] = await Promise.all([
     getPlanningDays(),
     listRecipes(),
     getHousehold(),
     listPortions(),
     listModes(),
-    listVleesjes(),
+    listFreezerStock(),
   ]);
   return (
     <PlanningView
       days={days}
       recipes={recipes}
       diners={household.diners}
-      freezer={{ portions, today: todayIso() }}
+      freezer={{ portions, today: todayIso(), vleesjes: stock.vleesjes, groenten: stock.groenten }}
       modes={modes}
-      vleesjes={vleesjes}
     />
   );
 }

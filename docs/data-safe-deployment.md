@@ -51,3 +51,17 @@ corepack pnpm dev --port 3001
 - The app is deployed on Vercel and this checkout is linked to the `menu-planner` project.
 - `package.json` build scripts do not automatically run seeds or migrations.
 - Git pushes to `main` may auto-deploy through the Vercel Git integration.
+
+## Freezer stock (vleesjes, groenten)
+
+- `vleesjes.count` / `groenten.amount` is what is physically in the freezer.
+  Several rows may share a name; names are matched exactly (trimmed,
+  case-insensitive), never with `ilike`.
+- Planned meals hold rows in `freezer_reservations` (oldest entry first, random
+  between equally old ones). The stock leaves the freezer once the meal's day
+  has passed: `settle_freezer_reservations(today)` runs on every freezer read.
+- Shortages (planned more than is free) are shown in the Vleesjes / Groenten
+  tab and on the meal, never clamped silently.
+- `scripts/rebalance-freezer.ts <env-file>` reserves stock for every upcoming
+  meal that is short, the same rule the app applies after each change. Back up
+  first when pointing it at `.env.prod.local`.

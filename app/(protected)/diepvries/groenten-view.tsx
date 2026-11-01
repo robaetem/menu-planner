@@ -36,15 +36,20 @@ import {
   type GroenteUnit,
 } from "@/lib/freezer/inventory";
 import type { Groente } from "@/lib/types";
+import type { FreezerStock } from "@/lib/freezer/stock";
+import { StockPlanned, StockShortages } from "@/components/stock-status";
 import { createGroente, deleteGroente, updateGroente } from "./actions";
 
 export function GroentenView({
   groenten,
   groenteNames,
+  stock,
   adding,
   onAddingChange,
 }: {
   groenten: Groente[];
+  /** Reservations by upcoming meals ("ingepland op …") and shortages. */
+  stock: FreezerStock;
   groenteNames: string[];
   /** The "new" dialog, opened from the button beside the tab picker. */
   adding: boolean;
@@ -69,6 +74,7 @@ export function GroentenView({
 
   return (
     <div>
+      <StockShortages stock={stock} format={(n, unit) => formatGroenteQuantity(n, normalizeGroenteUnit(unit))} />
 
       {groenten.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
@@ -77,7 +83,7 @@ export function GroentenView({
           </div>
           <h3 className="mt-4 text-lg font-semibold">Nog geen groenten in de diepvries</h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Houd hier zelf bij welke groenten je hebt ingevroren en pas de aantallen handmatig aan.
+            Voeg een groente toe telkens je groenten invriest. Daarna kan je ze kiezen bij het plannen.
           </p>
           <Button className="mt-5" onClick={() => onAddingChange(true)}>
             <Plus className="size-4" /> Eerste groente toevoegen
@@ -95,6 +101,11 @@ export function GroentenView({
                 <p className="mt-2 text-lg font-semibold tabular-nums">
                   {formatGroenteQuantity(Number(groente.amount ?? groente.count), normalizeGroenteUnit(groente.unit))}
                 </p>
+                <StockPlanned
+                  entry={stock.entries.find((e) => e.id === groente.id)}
+                  stock={stock}
+                  format={(n) => formatGroenteQuantity(n, normalizeGroenteUnit(groente.unit))}
+                />
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Button variant="ghost" size="icon-sm" onClick={() => setEditing(groente)} aria-label={`${groente.name} bewerken`}>

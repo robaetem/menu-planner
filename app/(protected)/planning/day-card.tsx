@@ -18,6 +18,7 @@ export function DayCard({
   onToggleSelect,
   onViewMeal,
   onPickVleesje,
+  onPickGroente,
 }: {
   planningDay: PlanningDay;
   diners: Diner[];
@@ -27,6 +28,7 @@ export function DayCard({
   onToggleSelect: () => void;
   onViewMeal: (meal: PlanMealWithRecipe) => void;
   onPickVleesje: (meal: PlanMealWithRecipe) => void;
+  onPickGroente: (meal: PlanMealWithRecipe) => void;
 }) {
   const { day_date, day_date: date, row } = planningDay;
   const meals = row?.meals ?? [];
@@ -55,6 +57,7 @@ export function DayCard({
       diners={diners}
       onViewMeal={onViewMeal}
       onPickVleesje={onPickVleesje}
+      onPickGroente={onPickGroente}
     />
   );
 
@@ -103,6 +106,7 @@ function MealSlot({
   diners,
   onViewMeal,
   onPickVleesje,
+  onPickGroente,
 }: {
   date: string;
   who: Assignee;
@@ -111,6 +115,7 @@ function MealSlot({
   diners: Diner[];
   onViewMeal: (meal: PlanMealWithRecipe) => void;
   onPickVleesje: (meal: PlanMealWithRecipe) => void;
+  onPickGroente: (meal: PlanMealWithRecipe) => void;
 }) {
   return (
     <DropZone date={date} assignee={who} className={full ? "" : "h-full"}>
@@ -127,6 +132,7 @@ function MealSlot({
               diners={diners}
               onView={() => onViewMeal(m)}
               onPickVleesje={() => onPickVleesje(m)}
+              onPickGroente={() => onPickGroente(m)}
             />
           ))}
         </div>

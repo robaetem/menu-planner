@@ -29,15 +29,20 @@ import {
 import { NameAutocomplete } from "@/components/name-autocomplete";
 import { formatMonthDay } from "@/lib/date";
 import type { Vleesje } from "@/lib/types";
+import type { FreezerStock } from "@/lib/freezer/stock";
+import { StockPlanned, StockShortages } from "@/components/stock-status";
 import { createVleesje, deleteVleesje, setVleesjeCount } from "./actions";
 
 export function VleesjesView({
   vleesjes: allVleesjes,
   vleesjeNames,
+  stock,
   adding,
   onAddingChange,
 }: {
   vleesjes: Vleesje[];
+  /** Reservations by upcoming meals ("ingepland op …") and shortages. */
+  stock: FreezerStock;
   vleesjeNames: string[];
   /** The "new" dialog, opened from the button beside the tab picker. */
   adding: boolean;
@@ -59,13 +64,13 @@ export function VleesjesView({
     });
   }
 
-  // A batch at 0 is out of the freezer. Its row stays so a meal that gets
-  // unplanned can put its vleesjes back onto it, but it isn't listed.
+  // A batch at 0 is out of the freezer; it isn't listed.
   const vleesjes = allVleesjes.filter((v) => v.count > 0);
-  const total = vleesjes.reduce((s, v) => s + v.count, 0);
+  const pieces = (n: number) => String(n);
 
   return (
     <div>
+      <StockShortages stock={stock} format={(n) => pieces(n)} />
 
       {vleesjes.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
@@ -92,6 +97,7 @@ export function VleesjesView({
                 <div className="mt-2">
                   <CountStepper value={v.count} onChange={(n) => run(() => setVleesjeCount(v.id, n))} />
                 </div>
+                <StockPlanned entry={stock.entries.find((e) => e.id === v.id)} stock={stock} format={pieces} />
               </div>
               <button
                 onClick={() => setDeleting(v)}

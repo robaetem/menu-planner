@@ -20,6 +20,7 @@ const TABLES = [
   "groenten",
   "groente_names",
   "freezer_portions",
+  "freezer_reservations",
 ];
 
 function readEnvFile(path) {

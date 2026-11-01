@@ -11,6 +11,8 @@ import { COUNTABLE, displayUnit, normalizeUnit } from "@/lib/planning/units";
 //                  adds Robin's portion, an Amber potje adds Amber's).
 //   fixed       -> amount(or amount_max) once per meal
 //   from_freezer / unlinked meals contribute nothing.
+//   An ingredient the meal takes from the freezer-vegetable inventory
+//   (template_groenten[].replaces) is skipped: it is already in the house.
 // Lines merge by (lower(name), lower(unit)); amount_max ("800-1000 g") is used so
 // we never under-buy.
 
@@ -94,8 +96,10 @@ export function computeShoppingList(
       }
       const ings = ingredientsByRecipe[meal.recipe_id] || [];
       mealsCounted++;
+      const fromFreezer = freezerReplacedIngredients(meal);
       for (const ig of ings) {
         if (ig.include_in_shopping === false) continue;
+        if (fromFreezer.has(ig.name.trim().toLowerCase())) continue;
         const quantity = plannedIngredientQuantity(ig, meal);
         const amount = quantity.amount_max ?? quantity.amount;
         add(ig.name, ig.unit, amount, ig.is_fresh, {
@@ -117,6 +121,15 @@ export function computeShoppingList(
     mealsFromFreezer,
     unlinkedMeals,
   };
+}
+
+/** Lowercased names of the recipe ingredients a meal takes from the freezer. */
+export function freezerReplacedIngredients(meal: { template_groenten?: { replaces?: string | null }[] | null }): Set<string> {
+  return new Set(
+    (meal.template_groenten || [])
+      .map((g) => (g.replaces || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 export function formatQuantity(line: Pick<ShoppingLine, "total" | "unit" | "hasNumeric">): string {

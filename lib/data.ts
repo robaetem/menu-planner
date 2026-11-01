@@ -2,6 +2,8 @@ import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
 import { parseOriginIndex, type ShoppingOriginIndex } from "@/lib/shopping/origins";
 import type { Portion, Who } from "@/lib/freezer/potjes";
+import { loadStock, settleFreezer } from "@/lib/freezer/stock-server";
+import type { FreezerStock } from "@/lib/freezer/stock";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 import type {
   Household,
@@ -90,6 +92,15 @@ export async function listPortions(): Promise<Portion[]> {
       };
     })
     .filter((p) => !(p.eatenOn && p.eatenOn < today));
+}
+
+/** Vleesjes and groenten with their reservations by upcoming meals. Settles
+ *  meals whose day has passed first, so the counts are what is in the freezer. */
+export async function listFreezerStock(): Promise<{ vleesjes: FreezerStock; groenten: FreezerStock }> {
+  const db = getDb();
+  await settleFreezer(db);
+  const [vleesjes, groenten] = await Promise.all([loadStock(db, "vleesje"), loadStock(db, "groente")]);
+  return { vleesjes, groenten };
 }
 
 export async function listVleesjes(): Promise<Vleesje[]> {

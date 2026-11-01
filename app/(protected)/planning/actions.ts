@@ -16,7 +16,8 @@ import {
 } from "@/lib/freezer/potjes";
 import { assertCookBefore, syncCookedPortions } from "@/lib/freezer/server";
 import { syncMealBuyLines, type BuyLineMeal } from "@/lib/shopping/sync-buy-lines";
-import type { Assignee, TemplateVleesje } from "@/lib/types";
+import { demandLines, rebalanceStock, syncMealStock } from "@/lib/freezer/stock-server";
+import type { Assignee, TemplateGroente, TemplateVleesje } from "@/lib/types";
 
 /** Get the plan_day row id for a date, creating it if needed. */
 async function ensureDay(db: SupabaseClient, dayDate: string): Promise<string> {
@@ -159,12 +160,12 @@ export async function deleteMeal(mealId: string): Promise<void> {
   const { error } = await db.from("plan_meals").delete().eq("id", mealId);
   if (error) throw error;
 
-  // Return any freezer vleesjes this meal had reserved back to the inventory.
-  if (meal?.template_vleesjes) {
-    for (const { name, count } of freezerTotals(meal.template_vleesjes as TemplateVleesje[]).values()) {
-      await restoreVleesje(db, name, count);
-    }
-    await syncMealBuyLines(db, buyLineMeal(meal), meal.template_vleesjes as TemplateVleesje[], []);
+  // Its freezer reservations went with it (cascade): the stock is free again
+  // and goes to the next meal that is short of it.
+  if (meal) {
+    await rebalanceStock(db, "vleesje");
+    await rebalanceStock(db, "groente");
+    await syncMealBuyLines(db, buyLineMeal(meal), (meal.template_vleesjes || []) as TemplateVleesje[], []);
   }
 
   revalidateFreezer();
@@ -265,23 +266,10 @@ function planReservations(
   return { release, reserve };
 }
 
-// ----------------------------------------------------------- template vleesjes ---
-function freezerTotals(vleesjes: TemplateVleesje[]): Map<string, { name: string; count: number }> {
-  const m = new Map<string, { name: string; count: number }>();
-  for (const v of vleesjes || []) {
-    if (v.source !== "freezer") continue;
-    const name = (v.name || "").trim();
-    const key = name.toLowerCase();
-    if (!key) continue;
-    const prev = m.get(key);
-    m.set(key, { name: prev?.name ?? name, count: (prev?.count ?? 0) + (Number(v.count) || 0) });
-  }
-  return m;
-}
-
+// ------------------------------------------- freezer vleesjes & groenten ---
 /** What a meal's buy lines on the boodschappenlijstje are labelled with. */
 const MEAL_FOR_BUY_LINES =
-  "template_vleesjes, assignee, freeform_title, raw_text, recipe:recipes(title), day:plan_days(day_date)";
+  "template_vleesjes, template_groenten, assignee, freeform_title, raw_text, recipe:recipes(title), day:plan_days(day_date)";
 
 function buyLineMeal(meal: any): BuyLineMeal {
   return {
@@ -291,50 +279,16 @@ function buyLineMeal(meal: any): BuyLineMeal {
   };
 }
 
-/** Every inventory row for a vleesje name, oldest first. The same name can sit in
- *  the freezer more than once (frozen on different days), one row per batch. */
-async function vleesjeRows(db: SupabaseClient, name: string): Promise<{ id: string; count: number }[]> {
-  const { data, error } = await db
-    .from("vleesjes")
-    .select("id, name, count")
-    .ilike("name", name)
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  const key = name.toLowerCase();
-  return (data || []).filter((r) => r.name.toLowerCase() === key);
+function revalidateStock() {
+  revalidatePath("/planning");
+  revalidatePath("/boodschappenlijstje");
+  revalidatePath("/vleesjes");
+  revalidatePath("/diepvries");
 }
 
-/** Put `count` of a vleesje back into the inventory by name (onto its oldest
- *  batch if it still exists, else recreate — names are the vleesje's identity). */
-async function restoreVleesje(db: SupabaseClient, name: string, count: number): Promise<void> {
-  if (count <= 0) return;
-  const [existing] = await vleesjeRows(db, name);
-  if (existing) {
-    await db.from("vleesjes").update({ count: existing.count + count }).eq("id", existing.id);
-  } else {
-    const { count: n } = await db.from("vleesjes").select("id", { count: "exact", head: true });
-    await db.from("vleesjes").insert({ name, count, sort: n || 0 });
-    const { data: known } = await db.from("vleesje_names").select("id").ilike("name", name).maybeSingle();
-    if (!known) await db.from("vleesje_names").insert({ name });
-  }
-}
-
-/** Take `count` of a vleesje out of the inventory by name, oldest batch first
- *  (clamped at 0). */
-async function consumeVleesje(db: SupabaseClient, name: string, count: number): Promise<void> {
-  let left = count;
-  for (const row of await vleesjeRows(db, name)) {
-    if (left <= 0) break;
-    const take = Math.min(row.count, left);
-    if (take <= 0) continue;
-    await db.from("vleesjes").update({ count: row.count - take }).eq("id", row.id);
-    left -= take;
-  }
-}
-
-/** Set the vleesjes chosen for a template meal. Freezer lines are reconciled
- *  against the inventory (restore the old selection, consume the new one); buy
- *  lines only land on the shopping list at generation time. */
+/** Set the vleesjes chosen for a template meal. Freezer lines reserve stock
+ *  (oldest entry first) that leaves the freezer on the meal's day; asking for
+ *  more than is free is refused. Buy lines go onto the boodschappenlijstje. */
 export async function setMealVleesjes(mealId: string, vleesjes: TemplateVleesje[]): Promise<void> {
   const db = getDb();
   const clean: TemplateVleesje[] = (vleesjes || [])
@@ -346,19 +300,38 @@ export async function setMealVleesjes(mealId: string, vleesjes: TemplateVleesje[
     .filter((v) => v.name);
 
   const { data: meal } = await db.from("plan_meals").select(MEAL_FOR_BUY_LINES).eq("id", mealId).maybeSingle();
-  const oldFreezer = freezerTotals((meal?.template_vleesjes || []) as TemplateVleesje[]);
-  const newFreezer = freezerTotals(clean);
-
-  for (const { name, count } of oldFreezer.values()) await restoreVleesje(db, name, count);
-  for (const { name, count } of newFreezer.values()) await consumeVleesje(db, name, count);
+  if (!meal) throw new Error("Maaltijd niet gevonden");
+  const day = (meal as any).day?.day_date ?? null;
+  // Throws (nothing written) when a raised line doesn't fit the free stock.
+  await syncMealStock(db, "vleesje", mealId, day, demandLines("vleesje", meal), demandLines("vleesje", { template_vleesjes: clean }));
 
   const { error } = await db.from("plan_meals").update({ template_vleesjes: clean }).eq("id", mealId);
   if (error) throw error;
-  if (meal) await syncMealBuyLines(db, buyLineMeal(meal), (meal.template_vleesjes || []) as TemplateVleesje[], clean);
-  revalidatePath("/planning");
-  revalidatePath("/boodschappenlijstje");
-  revalidatePath("/vleesjes");
-  revalidatePath("/diepvries");
+  await syncMealBuyLines(db, buyLineMeal(meal), (meal.template_vleesjes || []) as TemplateVleesje[], clean);
+  revalidateStock();
+}
+
+/** Set the freezer vegetables a meal takes. Same model as vleesjes; the recipe
+ *  ingredient each one `replaces` stays off the boodschappenlijstje. */
+export async function setMealGroenten(mealId: string, groenten: TemplateGroente[]): Promise<void> {
+  const db = getDb();
+  const clean: TemplateGroente[] = (groenten || [])
+    .map((g) => ({
+      name: (g.name || "").trim(),
+      unit: (g.unit || "").trim(),
+      amount: Math.max(0, Math.round((Number(g.amount) || 0) * 1000) / 1000),
+      replaces: (g.replaces || "").trim() || null,
+    }))
+    .filter((g) => g.name && g.amount > 0);
+
+  const { data: meal } = await db.from("plan_meals").select(MEAL_FOR_BUY_LINES).eq("id", mealId).maybeSingle();
+  if (!meal) throw new Error("Maaltijd niet gevonden");
+  const day = (meal as any).day?.day_date ?? null;
+  await syncMealStock(db, "groente", mealId, day, demandLines("groente", meal), demandLines("groente", { template_groenten: clean }));
+
+  const { error } = await db.from("plan_meals").update({ template_groenten: clean }).eq("id", mealId);
+  if (error) throw error;
+  revalidateStock();
 }
 
 /** Set how many extra potjes to cook & freeze, per person (Robin / Amber). */

@@ -4,11 +4,13 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Trash2, Snowflake, Minus, Plus, Beef, GripVertical } from "lucide-react";
+import { Trash2, Snowflake, Minus, Plus, Beef, Carrot, GripVertical, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { Diner, PlanMealWithRecipe } from "@/lib/types";
+import type { Diner, PlanMealWithRecipe, TemplateGroente } from "@/lib/types";
+import { mealStockStatus } from "@/lib/freezer/stock";
+import { demandOf } from "./stock-picker";
 import { formatDayShort } from "@/lib/date";
 import type { Portion, Who } from "@/lib/freezer/potjes";
 import { deleteMeal, setMealFreezer } from "./actions";
@@ -28,6 +30,7 @@ export function MealCard({
   diners,
   onView,
   onPickVleesje,
+  onPickGroente,
 }: {
   meal: PlanMealWithRecipe;
   full: boolean;
@@ -36,6 +39,7 @@ export function MealCard({
   diners: Diner[];
   onView: () => void;
   onPickVleesje: () => void;
+  onPickGroente: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -45,7 +49,9 @@ export function MealCard({
   const isTemplate = isVleesjeTemplate(meal.recipe);
   const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
   const beingDragged = drag?.meal.id === meal.id;
-  const { portions, today } = useFreezer();
+  const { portions, today, vleesjes, groenten } = useFreezer();
+  const vleesjeShort = shortTotal(mealStockStatus(vleesjes.entries, vleesjes.reservations, meal.id, demandOf("vleesje", meal)));
+  const groenteStatus = mealStockStatus(groenten.entries, groenten.reservations, meal.id, demandOf("groente", meal));
   const origin = potje ? freezerOrigin(portions.filter((p) => p.eatenByMealId === meal.id), today) : null;
 
   function run(fn: () => Promise<void>) {
@@ -94,6 +100,7 @@ export function MealCard({
             <TemplateTitle
               title={baseTitle}
               chosen={vleesjeChosen}
+              short={vleesjeShort}
               onPick={() => onPickVleesje()}
             />
           ) : (
@@ -125,6 +132,9 @@ export function MealCard({
             <Snowflake className="size-3" />
             {origin}
           </span>
+        )}
+        {!potje && (
+          <GroenteChip lines={meal.template_groenten ?? []} short={shortTotal(groenteStatus) > 0} onPick={onPickGroente} />
         )}
         {!potje && (
           <PotjesControl
@@ -159,14 +169,16 @@ function freezerOrigin(mine: Portion[], today: string): string | null {
 function TemplateTitle({
   title,
   chosen,
+  short,
   onPick,
 }: {
   title: string;
   chosen: string;
+  short: number;
   onPick: () => void;
 }) {
   const parts = title.split(/\[vleesje\]/i);
-  const chip = <VleesjeChip key="chip" chosen={chosen} onPick={onPick} />;
+  const chip = <VleesjeChip key="chip" chosen={chosen} short={short} onPick={onPick} />;
   if (parts.length === 1) {
     return (
       <>
@@ -187,7 +199,7 @@ function TemplateTitle({
   );
 }
 
-function VleesjeChip({ chosen, onPick }: { chosen: string; onPick: () => void }) {
+function VleesjeChip({ chosen, short, onPick }: { chosen: string; short: number; onPick: () => void }) {
   return (
     <button
       type="button"
@@ -204,6 +216,53 @@ function VleesjeChip({ chosen, onPick }: { chosen: string; onPick: () => void })
     >
       <Beef className="size-3" />
       {chosen || "kies vleesje"}
+      {short > 0 && <ShortBadge>{short} tekort</ShortBadge>}
+    </button>
+  );
+}
+
+function ShortBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="ml-0.5 inline-flex items-center gap-0.5 rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold text-white">
+      <TriangleAlert className="size-2.5" />
+      {children}
+    </span>
+  );
+}
+
+function shortTotal(status: { short: number }[]): number {
+  return status.reduce((s, x) => s + x.short, 0);
+}
+
+/** Freezer vegetables this meal takes; dashed "groente" when none yet. */
+function GroenteChip({
+  lines,
+  short,
+  onPick,
+}: {
+  lines: TemplateGroente[];
+  short: boolean;
+  onPick: () => void;
+}) {
+  const label = lines.map((g) => g.name).join(" + ");
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onPick();
+      }}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
+        lines.length
+          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : "border-dashed border-foreground/25 text-muted-foreground hover:text-foreground",
+      )}
+      aria-label={lines.length ? `Groenten uit de diepvries: ${label}` : "Groente uit de diepvries kiezen"}
+    >
+      <Carrot className="size-3" />
+      {lines.length ? label : "groente"}
+      {short && <ShortBadge>tekort</ShortBadge>}
     </button>
   );
 }

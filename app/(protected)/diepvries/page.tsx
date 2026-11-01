@@ -1,5 +1,6 @@
 import {
   getHousehold,
+  listFreezerStock,
   listGroenteNames,
   listGroenten,
   listPortions,
@@ -19,6 +20,9 @@ export default async function DiepvriesPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const params = await searchParams;
+  // Settle meals whose day has passed first, so the counts below are what is
+  // in the freezer now.
+  const stock = await listFreezerStock();
   const [portions, household, potjeNames, vleesjes, vleesjeNames, groenten, groenteNames] = await Promise.all([
     listPortions(),
     getHousehold(),
@@ -40,6 +44,7 @@ export default async function DiepvriesPage({
       vleesjeNames={vleesjeNames}
       groenten={groenten}
       groenteNames={groenteNames}
+      stock={stock}
     />
   );
 }

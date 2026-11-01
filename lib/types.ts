@@ -75,7 +75,8 @@ export type PlanMode = {
   created_at: string;
 };
 
-/** Raw meat in the freezer — single shared count (not portioned per person). */
+/** Raw meat in the freezer: one row per batch, several may share a name.
+ *  `count` is what is physically in the freezer; meals reserve from it. */
 export type Vleesje = {
   id: string;
   name: string;
@@ -84,7 +85,7 @@ export type Vleesje = {
   created_at: string;
 };
 
-/** Fully manual frozen-vegetable inventory; no recipe or planning coupling. */
+/** Frozen-vegetable inventory. Planned meals reserve from it (lib/freezer/stock.ts). */
 export type Groente = {
   id: string;
   name: string;
@@ -119,6 +120,16 @@ export type TemplateVleesje = {
   source: "freezer" | "buy";
 };
 
+/** A freezer vegetable a planned meal takes (in the entry's unit). `replaces`
+ *  is the recipe ingredient it stands in for: that one stays off the
+ *  boodschappenlijstje. */
+export type TemplateGroente = {
+  name: string;
+  unit: string;
+  amount: number;
+  replaces: string | null;
+};
+
 export type PlanMeal = {
   id: string;
   plan_day_id: string;
@@ -136,6 +147,7 @@ export type PlanMeal = {
   freezer_amber: number;
   from_freezer: boolean; // true = "Potje diepvries" (blue, eat from stock)
   template_vleesjes: TemplateVleesje[];
+  template_groenten: TemplateGroente[];
   note: string | null;
   sort: number;
 };

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Diner, Groente, Vleesje } from "@/lib/types";
 import type { Portion } from "@/lib/freezer/potjes";
 import type { FreezerTab } from "@/lib/freezer/inventory";
+import type { FreezerStock } from "@/lib/freezer/stock";
 import { PotjesView } from "../potjes/potjes-view";
 import { VleesjesView } from "../vleesjes/vleesjes-view";
 import { GroentenView } from "./groenten-view";
@@ -28,6 +29,7 @@ export function DiepvriesView({
   vleesjeNames,
   groenten,
   groenteNames,
+  stock,
 }: {
   initialTab: FreezerTab;
   portions: Portion[];
@@ -38,6 +40,7 @@ export function DiepvriesView({
   vleesjeNames: string[];
   groenten: Groente[];
   groenteNames: string[];
+  stock: { vleesjes: FreezerStock; groenten: FreezerStock };
 }) {
   const router = useRouter();
   const [tab, setTab] = React.useState<FreezerTab>(initialTab);
@@ -86,10 +89,10 @@ export function DiepvriesView({
           <PotjesView portions={portions} today={today} diners={diners} potjeNames={potjeNames} {...addingProps("potjes")} />
         </TabsContent>
         <TabsContent value="vleesjes">
-          <VleesjesView vleesjes={vleesjes} vleesjeNames={vleesjeNames} {...addingProps("vleesjes")} />
+          <VleesjesView vleesjes={vleesjes} stock={stock.vleesjes} vleesjeNames={vleesjeNames} {...addingProps("vleesjes")} />
         </TabsContent>
         <TabsContent value="groenten">
-          <GroentenView groenten={groenten} groenteNames={groenteNames} {...addingProps("groenten")} />
+          <GroentenView groenten={groenten} stock={stock.groenten} groenteNames={groenteNames} {...addingProps("groenten")} />
         </TabsContent>
       </Tabs>
     </div>

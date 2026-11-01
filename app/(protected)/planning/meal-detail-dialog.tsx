@@ -1,6 +1,6 @@
 "use client";
 
-import { Snowflake, Users, User, Leaf, Beef, ShoppingCart } from "lucide-react";
+import { Snowflake, Users, User, Leaf, Beef, Carrot, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,11 +11,14 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { serializePlannedIngredient } from "@/lib/planning/ingredient-quantity";
+import { freezerReplacedIngredients } from "@/lib/planning/shopping";
 import { assigneeLabel, isVleesjeTemplate, resolveTitle } from "./config";
 import type { Diner, PlanMealWithRecipe, RecipeWithIngredients } from "@/lib/types";
 import { addIsoDays, formatDayShort, formatMonthDay } from "@/lib/date";
 import { isInFreezer, type Portion } from "@/lib/freezer/potjes";
 import { useFreezer } from "./freezer-context";
+import { mealStockLines, mealStockStatus, stockKey, type MealShortage } from "@/lib/freezer/stock";
+import { formatGroenteQuantity, normalizeGroenteUnit } from "@/lib/freezer/inventory";
 
 export function MealDetailDialog({
   meal,
@@ -24,6 +27,7 @@ export function MealDetailDialog({
   open,
   onOpenChange,
   onPickVleesje,
+  onPickGroente,
 }: {
   meal: PlanMealWithRecipe | null;
   recipe: RecipeWithIngredients | null;
@@ -31,9 +35,17 @@ export function MealDetailDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onPickVleesje: () => void;
+  onPickGroente: () => void;
 }) {
-  const { portions, today } = useFreezer();
+  const freezer = useFreezer();
+  const { portions, today } = freezer;
   if (!meal) return null;
+  const vleesjeStatus = mealStockStatus(freezer.vleesjes.entries, freezer.vleesjes.reservations, meal.id, mealStockLines("vleesje", meal));
+  const groenteStatus = mealStockStatus(freezer.groenten.entries, freezer.groenten.reservations, meal.id, mealStockLines("groente", meal));
+  const shortOf = (status: MealShortage[], name: string, unit = "") =>
+    status.find((x) => stockKey(x.name, x.unit) === stockKey(name, unit))?.short ?? 0;
+  const groenten = meal.template_groenten ?? [];
+  const replaced = freezerReplacedIngredients(meal);
   const eats = portions.filter((p) => p.eatenByMealId === meal.id);
   const freezes = portions.filter((p) => p.sourceMealId === meal.id);
   const baseTitle = recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
@@ -123,11 +135,63 @@ export function MealDetailDialog({
                       <span className="flex-1">
                         {v.count}× {v.name}
                       </span>
-                      <span className="text-xs text-muted-foreground">
-                        {v.source === "freezer" ? "uit de diepvries" : "te kopen"}
-                      </span>
+                      {v.source === "freezer" && shortOf(vleesjeStatus, v.name) > 0 ? (
+                        <span className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                          {shortOf(vleesjeStatus, v.name)} tekort in de diepvries
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {v.source === "freezer" ? "uit de diepvries" : "te kopen"}
+                        </span>
+                      )}
                     </li>
                   ))}
+                </ul>
+              )}
+            </section>
+          )}
+          {!meal.from_freezer && (
+            <section>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                  <Carrot className="size-4 text-emerald-600" /> Groenten uit de diepvries
+                </h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onPickGroente();
+                  }}
+                >
+                  <Carrot className="size-3.5" /> {groenten.length ? "Wijzig" : "Kies groente"}
+                </Button>
+              </div>
+              {groenten.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Geen groenten uit de diepvries.</p>
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {groenten.map((g, i) => {
+                    const short = shortOf(groenteStatus, g.name, g.unit);
+                    const unit = normalizeGroenteUnit(g.unit);
+                    return (
+                      <li key={`${g.name}-${i}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3.5 py-2 text-sm">
+                        <Snowflake className="size-3.5 text-sky-500" />
+                        <span className="flex-1">
+                          {formatGroenteQuantity(g.amount, unit)} {g.name}
+                        </span>
+                        {short > 0 ? (
+                          <span className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                            {formatGroenteQuantity(short, unit)} tekort in de diepvries
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {g.replaces ? `${g.replaces} niet kopen` : "uit de diepvries"}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>
@@ -164,6 +228,11 @@ export function MealDetailDialog({
                           {serializePlannedIngredient(ig, meal).replace(/^vast:\s*/, "")}
                           {ig.is_fresh && <Leaf className="size-3.5 text-primary" />}
                         </span>
+                        {replaced.has(ig.name.trim().toLowerCase()) && (
+                          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-sky-700 dark:text-sky-300">
+                            <Snowflake className="size-3" /> uit de diepvries
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>

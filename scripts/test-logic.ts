@@ -22,6 +22,24 @@ import {
 } from "../lib/shopping/origins";
 import { applyBuyLines, parseBuyText } from "../lib/shopping/buy-lines";
 import {
+  availableByKey,
+  entryStatus,
+  guessReplacedIngredient,
+  mealStockStatus,
+  oldestFirst,
+  pickFromStock,
+  planFillShortages,
+  planMealReservations,
+  planTrimOverbooked,
+  shortagesByKey,
+  stockKey,
+  StockShortError,
+  type MealDemand,
+  type StockChange,
+  type StockEntry,
+  type StockReservation,
+} from "../lib/freezer/stock";
+import {
   clampFreezerCount,
   formatGroenteQuantity,
   legacyCountForAmount,
@@ -384,6 +402,169 @@ const r2 = rankRecipes(recipes, "10 recepten met verse groenten").map((r) => r.t
 eq("ranker: 'verse groenten' includes fresh-veg recipes", r2.includes("Snelle wraps") && r2.includes("Groentecurry") && !r2.includes("Stoofvlees"), true);
 const r3 = rankRecipes(recipes, "vriezer");
 eq("ranker: 'vriezer' -> Stoofvlees first", r3[0].title, "Stoofvlees");
+
+
+// ---- freezer stock: vleesjes & groenten with reservations ----
+{
+  const entry = (id: string, name: string, amount: number, createdAt: string, unit = ""): StockEntry => ({ id, name, unit, amount, createdAt });
+  // Apply a planned change in memory, as the server would write it.
+  let nextId = 0;
+  const apply = (res: StockReservation[], c: StockChange, meta: Record<string, string> = {}): StockReservation[] => {
+    let out = res.filter((r) => !c.remove.includes(r.id)).map((r) => {
+      const u = c.update.find((x) => x.id === r.id);
+      return u ? { ...r, amount: u.amount } : r;
+    });
+    for (const i of c.insert) out.push({ id: `r${++nextId}`, ...i, day: meta[i.mealId] ?? "", mealTitle: "" });
+    return out;
+  };
+  const held = (res: StockReservation[], mealId: string) => {
+    const per = new Map<string, number>();
+    for (const r of res.filter((x) => x.mealId === mealId)) per.set(r.entryId, (per.get(r.entryId) ?? 0) + r.amount);
+    return [...per].map(([e, n]) => `${e}:${n}`).sort();
+  };
+  const fixed = () => 0.5;
+
+  // Duplicate names, ilike-breaking characters, exact name match.
+  const hamburgers = [
+    entry("h-old", "Hamburger", 0, "2026-10-03 08:48:01+00"),
+    entry("h-mid", "hamburger ", 1, "2026-10-08 18:02:46+00"),
+    entry("h-new", "Hamburger", 4, "2026-10-15 19:15:34+00"),
+    entry("pct", "100% rund_burger", 2, "2026-10-01 00:00:00+00"),
+  ];
+  eq("stock: same name in other case/space is one stock", availableByKey(hamburgers, []).get(stockKey("HAMBURGER"))?.free, 5);
+  eq("stock: names with % and _ are matched exactly, not as a pattern", availableByKey(hamburgers, []).get(stockKey("100% rund_burger"))?.free, 2);
+  eq("stock: no partial-name match", pickFromStock(hamburgers, [], stockKey("Hamburg"), 1).short, 1);
+
+  // Oldest entry first (empty batches skipped), then the next one.
+  const pick3 = pickFromStock(hamburgers, [], stockKey("Hamburger"), 3, fixed);
+  eq("stock: takes from the oldest batch first", pick3.picks, [{ entryId: "h-mid", amount: 1 }, { entryId: "h-new", amount: 2 }]);
+  eq("stock: no shortage when it fits", pick3.short, 0);
+
+  // Random tie-break between equally old entries.
+  const twins = [entry("a", "Kip", 1, "2026-10-01 10:00:00+00"), entry("b", "Kip", 1, "2026-10-01 10:00:00+00"), entry("c", "Kip", 1, "2026-09-01 10:00:00+00")];
+  eq("stock: oldest stays first whatever the dice say", oldestFirst(twins, () => 0.9)[0].id, "c");
+  const seen = new Set<string>();
+  for (let i = 0; i < 6; i++) {
+    const dice = i % 2 ? [0.9, 0.1] : [0.1, 0.9];
+    seen.add(pickFromStock(twins.slice(0, 2), [], stockKey("Kip"), 1, () => dice.shift()!).picks[0].entryId);
+  }
+  eq("stock: equally old batches are picked at random (both happen)", [...seen].sort(), ["a", "b"]);
+
+  // Reserve on planning, nothing leaves the freezer, other meals see less.
+  const kip = [entry("k1", "Krokante kip", 0, "2026-10-03 08:48:26+00"), entry("k2", "Krokante kip", 10, "2026-10-08 18:02:06+00")];
+  const days: Record<string, string> = { m2: "2026-11-02", m5: "2026-11-05", m8: "2026-11-08", m9: "2026-11-09" };
+  let res: StockReservation[] = [];
+  res = apply(res, planMealReservations(kip, res, "m2", [], [{ name: "Krokante kip", unit: "", amount: 3 }], { strict: true }), days);
+  eq("reserve: meal holds 3 from the batch", held(res, "m2"), ["k2:3"]);
+  eq("reserve: entry still counts 10 in the freezer", kip[1].amount, 10);
+  eq("reserve: other meals see 7 free", availableByKey(kip, res, "m5").get(stockKey("Krokante kip"))?.free, 7);
+  eq("reserve: the meal itself sees its own 3 as free", availableByKey(kip, res, "m2").get(stockKey("Krokante kip"))?.free, 10);
+  eq("status: ingepland op day shown per entry", entryStatus(kip[1], res.map((r) => ({ ...r, day: days[r.mealId] }))).planned.map((p) => `${p.day}:${p.amount}`), ["2026-11-02:3"]);
+
+  // Asking for more than is free is refused, nothing written.
+  res = apply(res, planMealReservations(kip, res, "m5", [], [{ name: "Krokante kip", unit: "", amount: 2 }], { strict: true }), days);
+  let refused = "";
+  try {
+    planMealReservations(kip, res, "m8", [], [{ name: "Krokante kip", unit: "", amount: 6 }], { strict: true });
+  } catch (e) {
+    refused = e instanceof StockShortError ? e.message : "wrong error";
+  }
+  eq("shortage: planning more than is free is blocked", refused, "Er is nog maar 5 Krokante kip vrij in de diepvries.");
+
+  // Edit: lower gives back (newest batch first), raise takes more.
+  const two = [entry("o", "Worst", 1, "2026-09-01 00:00:00+00"), entry("n", "Worst", 3, "2026-10-01 00:00:00+00")];
+  let wres: StockReservation[] = [];
+  wres = apply(wres, planMealReservations(two, wres, "w", [], [{ name: "Worst", unit: "", amount: 3 }], { strict: true }), { w: "2026-11-03" });
+  eq("edit: 3 worsten = oldest 1 + 2 from the next batch", held(wres, "w"), ["n:2", "o:1"]);
+  wres = apply(wres, planMealReservations(two, wres, "w", [{ name: "Worst", unit: "", amount: 3 }], [{ name: "Worst", unit: "", amount: 1 }], { strict: true }));
+  eq("edit: lowering to 1 keeps the oldest batch", held(wres, "w"), ["o:1"]);
+  wres = apply(wres, planMealReservations(two, wres, "w", [{ name: "Worst", unit: "", amount: 1 }], [], { strict: true }));
+  eq("edit: removing the line releases everything", held(wres, "w"), []);
+  const unchanged = planMealReservations(kip, res, "m2", [{ name: "Krokante kip", unit: "", amount: 3 }], [{ name: "Krokante kip", unit: "", amount: 3 }], { strict: true });
+  eq("edit: unchanged line writes nothing", unchanged, { insert: [], update: [], remove: [] });
+
+  // Over-booked plan (migrated data): shortage shown, not clamped; earliest day served first.
+  const demands: MealDemand[] = [
+    { mealId: "m2", day: days.m2, sort: 0, lines: [{ name: "Krokante kip", unit: "", amount: 3 }] },
+    { mealId: "m5", day: days.m5, sort: 0, lines: [{ name: "Krokante kip", unit: "", amount: 2 }] },
+    { mealId: "m8", day: days.m8, sort: 0, lines: [{ name: "Krokante kip", unit: "", amount: 6 }] },
+    { mealId: "m9", day: days.m9, sort: 0, lines: [{ name: "Krokante kip", unit: "", amount: 1 }, { name: "Krokant vleesje", unit: "", amount: 1 }] },
+  ];
+  res = apply(res, planFillShortages(kip, res, demands), days);
+  eq("fill: 11-08 gets the 5 that are left", held(res, "m8"), ["k2:5"]);
+  eq("fill: 11-09 gets none", held(res, "m9"), []);
+  eq(
+    "shortage: 2 Krokante kip short over 11-08 and 11-09, 1 Krokant vleesje short",
+    [...shortagesByKey(kip, res, demands).values()].map((s) => `${s.name}:${s.short}:${s.days.map((d) => d.day).join("+")}`),
+    ["Krokante kip:2:2026-11-08+2026-11-09", "Krokant vleesje:1:2026-11-09"],
+  );
+  eq("shortage per meal", mealStockStatus(kip, res, "m8", demands[2].lines).map((s) => s.short), [1]);
+  let notRaised = "ok";
+  try {
+    planMealReservations(kip, res, "m8", demands[2].lines, demands[2].lines, { strict: true });
+  } catch {
+    notRaised = "threw";
+  }
+  eq("shortage: re-saving a short meal without raising it is allowed", notRaised, "ok");
+
+  // Delete: its reservations go (cascade), the next short meal takes them.
+  const afterDelete = res.filter((r) => r.mealId !== "m5");
+  const refill = planFillShortages(kip, afterDelete, demands.filter((d) => d.mealId !== "m5"));
+  const res2 = apply(afterDelete, refill, days);
+  eq("delete: freed 2 go to 11-08 (1) and 11-09 (1)", [held(res2, "m8"), held(res2, "m9")], [["k2:6"], ["k2:1"]]);
+  eq("delete: no Krokante kip shortage left", [...shortagesByKey(kip, res2, demands.filter((d) => d.mealId !== "m5")).keys()], [stockKey("Krokant vleesje")]);
+
+  // Move: reservations stay with the meal, its new day is what the tab shows.
+  const moved = res2.map((r) => (r.mealId === "m2" ? { ...r, day: "2026-11-04" } : r));
+  eq("move: meal keeps its vleesjes", held(moved, "m2"), ["k2:3"]);
+  eq("move: freezer tab shows the new day", entryStatus(kip[1], moved).planned.find((p) => p.mealId === "m2")?.day, "2026-11-04");
+  eq("move: nothing is released or re-reserved", planFillShortages(kip, moved, demands.filter((d) => d.mealId !== "m5")).insert, []);
+
+  // Stock counted down by hand: latest meals give back first.
+  const counted = [kip[0], { ...kip[1], amount: 8 }];
+  const trimmed = apply(res2, planTrimOverbooked(counted, res2));
+  eq("trim: 10 -> 8 takes 2 from the latest days", [held(trimmed, "m9"), held(trimmed, "m8")], [[], ["k2:5"]]);
+
+  // Groenten: same model with units and decimals.
+  const kool = [entry("g1", "Witte kool 2P", 2, "2026-10-11 10:27:10+00", "stuk"), entry("g2", "Spitskool", 200, "2026-09-12 17:56:36+00", "gram")];
+  let gres: StockReservation[] = [];
+  gres = apply(gres, planMealReservations(kool, gres, "wk", [], [{ name: "Witte kool 2P", unit: "stuk", amount: 1 }], { strict: true }), { wk: "2026-11-06" });
+  eq("groente: reserves 1 stuk Witte kool 2P", held(gres, "wk"), ["g1:1"]);
+  eq("groente: unit is part of the identity", availableByKey(kool, gres).get(stockKey("Spitskool", "stuk")), undefined);
+  gres = apply(gres, planMealReservations(kool, gres, "sk", [], [{ name: "Spitskool", unit: "gram", amount: 150.5 }], { strict: true }));
+  eq("groente: decimals in grams", availableByKey(kool, gres).get(stockKey("Spitskool", "gram"))?.free, 49.5);
+  eq("groente: 'Witte kool 2P' replaces ingredient 'Witte kool'", guessReplacedIngredient("Witte kool 2P", ["Aardappelen", "Witte kool", "Muskaatnoot"]), "Witte kool");
+  eq("groente: 'Prei 1P' replaces 'Prei'", guessReplacedIngredient("Prei 1P", ["Prei", "Aardappelen"]), "Prei");
+  eq("groente: no match -> nothing replaced", guessReplacedIngredient("Erwten", ["Prei"]), null);
+}
+
+// ---- freezer groenten stay off the shopping list ----
+{
+  const ing = (name: string, amount: number, unit = "stuk") => ({
+    id: name, recipe_id: "wk", name, unit, scaling: "per_serving", amount, amount_max: null,
+    amounts_per_person: {}, is_fresh: false, include_in_shopping: true, sort: 0,
+  });
+  const meal = (template_groenten: any[]) => ({
+    recipe_id: "wk", recipe: { id: "wk", title: "Witte kool" }, assignee: "both", diner_count: 2,
+    diner_keys: ["robin", "amber"], freezer_robin: 0, freezer_amber: 0, from_freezer: false, template_groenten,
+  });
+  const byRecipe: Record<string, any[]> = { wk: [ing("Witte kool", 0.5), ing("Aardappelen", 200, "gram")] };
+  const plain = computeShoppingList([{ id: "d", day_date: "2026-11-06", meals: [meal([])] }] as any, byRecipe);
+  eq("shopping: witte kool on the list when not from the freezer", plain.all.map((l) => l.name), ["Aardappelen", "Witte kool"]);
+  const frozen = computeShoppingList(
+    [{ id: "d", day_date: "2026-11-06", meals: [meal([{ name: "Witte kool 2P", unit: "stuk", amount: 1, replaces: "witte kool" }])] }] as any,
+    byRecipe,
+  );
+  eq("shopping: freezer groente keeps witte kool off the list", frozen.all.map((l) => l.name), ["Aardappelen"]);
+  const other = computeShoppingList(
+    [
+      { id: "d", day_date: "2026-11-06", meals: [meal([{ name: "Witte kool 2P", unit: "stuk", amount: 1, replaces: "Witte kool" }])] },
+      { id: "e", day_date: "2026-11-07", meals: [meal([])] },
+    ] as any,
+    byRecipe,
+  );
+  eq("shopping: only that meal's share is left off", formatQuantity(other.all.find((l) => l.name === "Witte kool")!), "1 stuk");
+}
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);
