@@ -37,7 +37,7 @@ import {
 } from "@/lib/freezer/inventory";
 import type { Groente } from "@/lib/types";
 import type { FreezerStock } from "@/lib/freezer/stock";
-import { StockPlanned, StockShortages } from "@/components/stock-status";
+import { StockPlanned } from "@/components/stock-status";
 import { createGroente, deleteGroente, updateGroente } from "./actions";
 
 export function GroentenView({
@@ -74,7 +74,6 @@ export function GroentenView({
 
   return (
     <div>
-      <StockShortages stock={stock} format={(n, unit) => formatGroenteQuantity(n, normalizeGroenteUnit(unit))} />
 
       {groenten.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">

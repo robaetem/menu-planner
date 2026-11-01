@@ -30,7 +30,7 @@ import { NameAutocomplete } from "@/components/name-autocomplete";
 import { formatMonthDay } from "@/lib/date";
 import type { Vleesje } from "@/lib/types";
 import type { FreezerStock } from "@/lib/freezer/stock";
-import { StockPlanned, StockShortages } from "@/components/stock-status";
+import { StockPlanned } from "@/components/stock-status";
 import { createVleesje, deleteVleesje, setVleesjeCount } from "./actions";
 
 export function VleesjesView({
@@ -70,7 +70,6 @@ export function VleesjesView({
 
   return (
     <div>
-      <StockShortages stock={stock} format={(n) => pieces(n)} />
 
       {vleesjes.length === 0 ? (
         <div className="mt-10 flex flex-col items-center rounded-xl border border-dashed py-16 text-center">
