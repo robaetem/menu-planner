@@ -20,6 +20,7 @@ import type { TemplateVleesje } from "@/lib/types";
 /** Every table the chat may read. Nothing else, and only with select. */
 export const CHAT_TABLES = [
   "household",
+  "ingredient_category_map",
   "recipes",
   "ingredients",
   "recipe_tags",
@@ -179,7 +180,7 @@ export const dataTools = {
 
   findMeals: tool({
     description:
-      "Zoek in ALLE geplande en gegeten maaltijden (hele geschiedenis en toekomst) op naam van het gerecht. Geeft per gerecht: hoe vaak, eerste keer, laatst gegeten (t.e.m. vandaag) en volgende keer gepland, plus de lijst met datums en wie at. Zonder zoekterm: alle gerechten in de periode, het vaakst eerst (voor 'wat eten we het meest'). Optioneel filteren op wie (Samen/Amber/Robin) of alleen potjes.",
+      "Zoek in ALLE geplande en gegeten maaltijden (hele geschiedenis en toekomst) op naam van het gerecht, en in de dagnotities (bv. 'tante Sofie', 'restaurant'). Geeft per gerecht: hoe vaak, eerste keer, laatst gegeten (t.e.m. vandaag) en volgende keer gepland, plus de lijst met datums en wie at. Zonder zoekterm: alle gerechten in de periode, het vaakst eerst (voor 'wat eten we het meest'). Optioneel filteren op wie (Samen/Amber/Robin) of alleen potjes.",
     inputSchema: z.object({
       search: z.string().max(80).optional().describe("Deel van de gerechtnaam, bv. 'witte kool'"),
       from: isoDate.optional(),
@@ -191,7 +192,9 @@ export const dataTools = {
       const today = todayIso();
       const rows = await loadDays(f, t);
       const hits: { date: string; title: string; who: string; potje: boolean }[] = [];
-      for (const d of rows)
+      const notes: { day: string; note: string }[] = [];
+      for (const d of rows) {
+        if (search && d.note && matchesAll(d.note, search)) notes.push({ day: dayLabel(d.day_date), note: d.note });
         for (const m of sortedMeals(d)) {
           const title = mealTitle(m);
           if (search && !matchesAll(`${title} ${m.raw_text ?? ""}`, search)) continue;
@@ -199,6 +202,7 @@ export const dataTools = {
           if (onlyPotjes && !m.from_freezer) continue;
           hits.push({ date: d.day_date, title, who: WHO[m.assignee] ?? m.assignee, potje: m.from_freezer });
         }
+      }
       // Group by dish: the recipe part of the title (before " met <vleesjes>").
       const groups = new Map<string, { dish: string; times: number; dates: string[] }>();
       for (const h of hits) {
@@ -232,6 +236,7 @@ export const dataTools = {
         meals: (search || who || onlyPotjes || hits.length <= MAX_ROWS ? hits : [])
           .slice(-MAX_ROWS)
           .map((h) => ({ day: dayLabel(h.date), title: h.title, who: h.who, ...(h.potje ? { potje: true } : {}) })),
+        ...(notes.length ? { dagnotities: notes.slice(-MAX_ROWS) } : {}),
         ...(hits.length > MAX_ROWS ? { note: `Alleen de laatste ${MAX_ROWS} maaltijden staan in 'meals'.` } : {}),
       };
     },
@@ -292,11 +297,11 @@ export const dataTools = {
 
   getRecipe: tool({
     description:
-      "Eén recept volledig: ingrediënten met hoeveelheden (voor 2 personen samen, of per persoon), wat niet op het boodschappenlijstje komt, bereiding, notities, tags en wanneer het ingepland was/is. Zoek op (deel van) de naam; bij twijfel staan andere kandidaten in otherMatches.",
+      "Eén recept volledig: ingrediënten met hoeveelheden (voor 2 personen samen, of per persoon), wat niet op het boodschappenlijstje komt, bereiding, notities, tags en wanneer het ingepland was/is. Noem hoeveelheden precies zoals ze er staan; verzin er geen bij. Zoek op (deel van) de naam; bij twijfel staan andere kandidaten in otherMatches.",
     inputSchema: z.object({ title: z.string().min(1).max(120).describe("(Deel van) de receptnaam") }),
     execute: async ({ title }) => {
       const [recipes, tags] = await Promise.all([
-        from("recipes").select("id, title, tags, has_vleesje, base_servings, method, notes, ingredients(name, unit, scaling, amount, amount_max, amounts_per_person, include_in_shopping, sort)"),
+        from("recipes").select("id, title, tags, has_vleesje, base_servings, method, notes, image_path, ingredients(name, unit, scaling, amount, amount_max, amounts_per_person, include_in_shopping, sort)"),
         from("recipe_tags").select("value, label"),
       ]);
       if (recipes.error) return { error: "Recept ophalen mislukt" };
@@ -323,9 +328,9 @@ export const dataTools = {
           if (i.scaling === "per_person" && Object.keys(per).length) {
             row.perPerson = Object.entries(per).map(([k, v]) => `${k === "amber" ? "Amber" : k === "robin" ? "Robin" : k} ${v}${i.unit ? ` ${i.unit}` : ""}`).join(", ");
           } else if (i.scaling === "fixed") {
-            row.amount = i.amount == null ? i.unit || null : `${i.amount}${i.unit ? ` ${i.unit}` : ""} (vast)`;
+            row.amount = i.amount == null ? "geen hoeveelheid ingevuld" : `${i.amount}${i.unit ? ` ${i.unit}` : ""} (vast)`;
           } else {
-            row.amountSamen = qty(i.amount, i.amount_max, i.unit);
+            row.amountSamen = i.amount == null ? "geen hoeveelheid ingevuld" : qty(i.amount, i.amount_max, i.unit);
           }
           if (!i.include_in_shopping) row.nietOpBoodschappenlijst = true;
           return row;
@@ -338,6 +343,7 @@ export const dataTools = {
         ingredients,
         method: r.method || null,
         notes: r.notes || null,
+        foto: r.image_path ? (/^https?:/i.test(r.image_path) ? `link: ${r.image_path}` : "eigen foto opgeladen") : "geen foto",
         planned: {
           times: dates.length,
           last: dates.filter((d) => d <= today).map(dayLabel).pop() ?? null,
@@ -442,15 +448,17 @@ export const dataTools = {
 
   getSettings: tool({
     description:
-      "Lijsten die je in de app zelf beheert: recept-tags, de situaties per persoon (Amber/Robin, bv. 'tot 18u', 'Thuiswerk'; zonder keuze 'Thuis'), de winkelsecties van het boodschappenlijstje en wie er in het huishouden is.",
-    inputSchema: z.object({}),
-    execute: async () => {
-      const [tags, modes, cats, hh] = await Promise.all([
+      "Lijsten die je in de app zelf beheert: recept-tags, de situaties per persoon (Amber/Robin, bv. 'tot 18u', 'Thuiswerk'; zonder keuze 'Thuis'), de winkelsecties van het boodschappenlijstje, wie er in het huishouden is en tot wanneer de planning loopt. Met `ingredient`: in welke winkelsectie dat ingrediënt staat.",
+    inputSchema: z.object({ ingredient: z.string().max(80).optional().describe("Optioneel: toon de winkelsectie van ingrediënten die hierop lijken") }),
+    execute: async ({ ingredient }) => {
+      const [tags, modes, cats, hh, map] = await Promise.all([
         from("recipe_tags").select("label, sort").order("sort"),
         from("plan_modes").select("who, label, sort").order("sort"),
-        from("ingredient_categories").select("name, sort").order("sort"),
-        from("household").select("name, diners").limit(1).maybeSingle(),
+        from("ingredient_categories").select("id, name, sort").order("sort"),
+        from("household").select("name, diners, plan_horizon").limit(1).maybeSingle(),
+        ingredient ? from("ingredient_category_map").select("name, category_id, source").ilike("name", `%${ingredient.replace(/[%_]/g, "")}%`).limit(20) : Promise.resolve({ data: null }),
       ]);
+      const catName = new Map(((cats.data ?? []) as any[]).map((c) => [c.id, c.name]));
       const ms = (modes.data ?? []) as any[];
       return {
         household: hh.data?.name ?? "Robin & Amber",
@@ -461,6 +469,16 @@ export const dataTools = {
           Robin: ["Thuis (standaard)", ...ms.filter((m) => m.who === "robin").map((m) => m.label)],
         },
         winkelsecties: (cats.data ?? []).map((c: any) => c.name),
+        planningLooptTot: hh.data?.plan_horizon ? dayLabel(hh.data.plan_horizon) : null,
+        ...(ingredient
+          ? {
+              ingredientSecties: ((map.data ?? []) as any[]).map((m) => ({
+                ingredient: m.name,
+                sectie: catName.get(m.category_id) ?? "Overig",
+                gekozen: m.source === "ai" ? "automatisch" : "zelf gekozen",
+              })),
+            }
+          : {}),
       };
     },
   }),

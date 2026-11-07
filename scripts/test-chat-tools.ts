@@ -5,7 +5,7 @@ import { LOCAL_DB } from "./chat-test-env";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { derive, type Facts } from "../lib/change/status";
-import { safePath } from "../lib/chat/code-tools";
+import { grep, safePath, untar } from "../lib/chat/code-tools";
 import { CHAT_TABLES, dataTools, dayLabel, docToText, matchesAll, norm } from "../lib/chat/data-tools";
 import { APP_KNOWLEDGE } from "../lib/chat/app-knowledge";
 import { appGuideTools } from "../lib/chat/app-guide";
@@ -53,12 +53,12 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   "@/lib/freezer/potjes": ["readyOn"],
   "@/app/(protected)/planning/config": ["resolveTitle"],
   "@/lib/types": ["*"],
-  "@/lib/change/github": ["gh"],
+  "@/lib/change/github": ["gh", "repo"],
   "@/lib/change/runs": ["startChange"],
   "./ops": ["*"],
   "@clerk/nextjs/server": ["currentUser"],
 };
-const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale"]);
+const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale", "node:zlib"]);
 for (const file of walk("lib/chat")) {
   const src = readFileSync(file, "utf8");
   for (const m of src.matchAll(/import\s+(type\s+)?(?:\{([^}]*)\}|(\w+))\s+from\s+["']([^"']+)["']/g)) {
@@ -76,7 +76,7 @@ for (const file of walk("lib/chat")) {
 }
 
 // 1d. Every chat tool is known: read-only data/guide/code tools plus request_change.
-const READ_TOOLS = ["getPlanning", "findMeals", "listRecipes", "getRecipe", "getFreezer", "getShoppingList", "getSettings", "appGuide", "listFiles", "readFile"];
+const READ_TOOLS = ["getPlanning", "findMeals", "listRecipes", "getRecipe", "getFreezer", "getShoppingList", "getSettings", "appGuide", "searchCode", "listFiles", "readFile"];
 check("data tools are all known read tools", Object.keys(dataTools).every((k) => READ_TOOLS.includes(k)), Object.keys(dataTools));
 // Changes are only proposed: the two propose tools have no execute (the client
 // shows an approval card), and no other tool exists besides the read tools.
@@ -87,8 +87,8 @@ check("proposeCodeChange has no execute", typeof all.proposeCodeChange.execute =
 check("no request_change tool any more", !("request_change" in all));
 
 // Op schema: deletes only as delete* ops with userAskedToDelete: true.
-check("delete ops all start with delete/remove", [...DELETE_OPS].every((o) => /^(delete|remove)/.test(o)) && DELETE_OPS.size >= 8, [...DELETE_OPS]);
-check("non-delete ops have no delete flag", OpSchema.options.every((o) => /^(delete|remove)/.test(o.shape.op.value) === ("userAskedToDelete" in o.shape)));
+check("delete ops all start with delete/remove/clear", [...DELETE_OPS].every((o) => /^(delete|remove|clear)/.test(o)) && DELETE_OPS.size >= 8, [...DELETE_OPS]);
+check("non-delete ops have no delete flag", OpSchema.options.every((o) => /^(delete|remove|clear)/.test(o.shape.op.value) === ("userAskedToDelete" in o.shape)));
 check("delete without flag is rejected", !OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x" }).success);
 check("delete with flag false is rejected", !OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x", userAskedToDelete: false }).success);
 check("delete with flag is accepted", OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x", userAskedToDelete: true }).success);
@@ -100,6 +100,34 @@ check("max ops", !OpsSchema.safeParse(Array.from({ length: 21 }, () => ({ op: "e
 check("safePath ok", safePath("lib/data.ts") === "lib/data.ts");
 check("safePath blocks .env", safePath(".env.local") === null && safePath("a/.env") === null);
 check("safePath blocks ..", safePath("../x") === null && safePath(".git/config") === null);
+
+// searchCode: tar reader skips secrets/binaries, grep finds lines.
+{
+  const entry = (name: string, body: string, type = "0") => {
+    const h = Buffer.alloc(512);
+    h.write(name, 0);
+    h.write(Buffer.byteLength(body).toString(8).padStart(11, "0"), 124);
+    h.write(type, 156);
+    const b = Buffer.alloc(Math.ceil(Buffer.byteLength(body) / 512) * 512);
+    b.write(body);
+    return Buffer.concat([h, b]);
+  };
+  const longPath = "app/(protected)/planning/" + "x".repeat(120) + ".tsx";
+  const tar = Buffer.concat([
+    entry("o-r-sha/", "", "5"),
+    entry("o-r-sha/lib/a.ts", "const x = 1;\nexport function settle() {}\n"),
+    entry("o-r-sha/.env.local", "SECRET=1"),
+    entry("o-r-sha/public/logo.png", "PNG"),
+    entry("pax", `${("path=o-r-sha/" + longPath).length + 5} path=o-r-sha/${longPath}\n`, "x"),
+    entry("o-r-sha/short", "Zelf toegevoegd blijft staan"),
+    Buffer.alloc(1024),
+  ]);
+  const files = untar(tar);
+  check("untar keeps code, drops .env and images", files.map((f) => f.path).join(",") === `lib/a.ts,${longPath}`, files.map((f) => f.path));
+  const g = grep(files, "EXPORT settle");
+  check("grep matches all words, case-insensitive", g.matches.length === 1 && g.matches[0].line === 2 && g.matches[0].path === "lib/a.ts", g);
+  check("grep under a folder", grep(files, "zelf", "app/").matches.length === 1 && grep(files, "zelf", "lib/").matches.length === 0);
+}
 
 // 3. status derivation
 const base: Facts = { workflow: null, pr: null, checks: [], deploy: null, ageMs: 1000 };
@@ -228,6 +256,17 @@ async function dbTests() {
   check("deleted meal is back", ((await db.from("plan_meals").select("id, day:plan_days!inner(day_date)").eq("day.day_date", D(13))).data ?? []).length === 1);
   check("undo edit", (await undoReq(e1.undoId)).body.ok === true);
   check("undo restores the exact state (edit + delete)", (await state()) === s3);
+
+  // e2. photo link: set and clear only touch the row; undo puts it back.
+  const s4 = await state();
+  const p1 = await post([{ op: "setRecipeImage", recipe, imageUrl: "https://example.com/soep.jpg" }]);
+  const img = (await db.from("recipes").select("image_path").eq("title", recipe).maybeSingle()).data?.image_path;
+  check("setRecipeImage applied", p1.ok === true && img === "https://example.com/soep.jpg", { p1, img });
+  const p2 = await post([{ op: "clearRecipeImage", recipe, userAskedToDelete: true }]);
+  check("clearRecipeImage applied", p2.ok === true && (await db.from("recipes").select("image_path").eq("title", recipe).maybeSingle()).data?.image_path === null, p2);
+  check("undo clear + set", (await undoReq(p2.undoId)).body.ok === true && (await undoReq(p1.undoId)).body.ok === true);
+  check("undo restores the exact state (photo)", (await state()) === s4);
+  check("bad photo link refused", (await post([{ op: "setRecipeImage", recipe, imageUrl: "javascript:alert(1)" }])).ok === false);
 
   // f. undo refuses when the same rows were edited since (no lost work).
   const f = await post([{ op: "setDayNote", date: D(14), note: "eerst" }]);

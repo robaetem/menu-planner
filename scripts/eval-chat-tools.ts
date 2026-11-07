@@ -91,13 +91,25 @@ async function snapshot() {
     recipes: recipes.data as any[],
     tags: tags.data as any[],
     modes: modes.data as any[],
-    vleesjes: stock(vleesjes.data!, "vleesje_id", (e) => Number(e.count)),
-    groenten: stock(groenten.data!, "groente_id", (e) => Number(e.amount)),
+    vleesjes: byName(stock(vleesjes.data!, "vleesje_id", (e) => Number(e.count))),
+    groenten: byName(stock(groenten.data!, "groente_id", (e) => Number(e.amount))),
     potjes,
     shop: shop.data as any,
   };
 }
 type Snap = Awaited<ReturnType<typeof snapshot>>;
+/** One line per name (the app also adds batches up); empty batches dropped. */
+function byName(list: any[]) {
+  const m = new Map<string, any>();
+  for (const e of list) {
+    const k = `${e.name.toLowerCase()}|${e.unit ?? ""}`;
+    const cur = m.get(k) ?? { ...e, amount: 0, reserved: [] };
+    cur.amount += e.amount;
+    cur.reserved = [...cur.reserved, ...e.reserved];
+    m.set(k, cur);
+  }
+  return [...m.values()].filter((e) => e.amount > 0 || e.reserved.length);
+}
 
 // ---------- questions ----------
 const day = (s: Snap, date: string) => s.days.find((d) => d.date === date);
@@ -118,17 +130,20 @@ const lastWeekday = (wd: number) => { let d = addIsoDays(TODAY, -7); while (dow(
 const prevMonth = () => { const [y, m] = TODAY.split("-").map(Number); const pm = m === 1 ? 12 : m - 1; const py = m === 1 ? y - 1 : y; const from = `${py}-${String(pm).padStart(2, "0")}-01`; return { from, to: addIsoDays(`${y}-${String(m).padStart(2, "0")}-01`, -1) }; };
 const mealsMatching = (s: Snap, q: string) => s.meals.filter((m) => m.title.toLowerCase().includes(q.toLowerCase()));
 const potjesNow = (s: Snap, who?: string) => {
-  const m = new Map<string, { robin: number; amber: number; planned: string[] }>();
+  const m = new Map<string, Record<"robin" | "amber", { in: number; planned: string[] }>>();
   for (const p of s.potjes.filter((p) => p.inFreezer && (!who || p.who === who))) {
-    const e = m.get(p.name) ?? { robin: 0, amber: 0, planned: [] };
-    e[p.who as "robin" | "amber"]++;
-    if (p.eatenOn) e.planned.push(`${p.who} op ${p.eatenOn}`);
+    const e = m.get(p.name) ?? { robin: { in: 0, planned: [] }, amber: { in: 0, planned: [] } };
+    const k = p.who as "robin" | "amber";
+    e[k].in++;
+    if (p.eatenOn) e[k].planned.push(p.eatenOn);
     m.set(p.name, e);
   }
-  return [...m].map(([n, v]) => `${n}: Robin ${v.robin}, Amber ${v.amber}${v.planned.length ? ` (al ingepland: ${v.planned.join(", ")})` : " (vrij)"}`).join("\n");
+  const part = (n: string, v: { in: number; planned: string[] }) => (v.in ? `${n} ${v.in} in diepvries, waarvan ${v.planned.length} al ingepland${v.planned.length ? ` (${v.planned.join(", ")})` : ""}, dus ${v.in - v.planned.length} vrij` : "");
+  return [...m].map(([n, v]) => `${n}: ${[part("Robin", v.robin), part("Amber", v.amber)].filter(Boolean).join("; ")}`).join("\n");
 };
 const stockLine = (e: any) => `${e.name}: ${e.amount}${e.unit ? " " + e.unit : ""} in diepvries${e.reserved.length ? `, gereserveerd: ${e.reserved.map((r: any) => `${r.amount} voor ${r.day}`).join(", ")}` : ""}`;
 
+const CAL = Array.from({ length: 160 }, (_, i) => addIsoDays(TODAY, i - 130)).map((d) => `${d} ${WD[dow(d)].slice(0, 2)}`).join(", ");
 const NEXT_MON = (() => { let d = addIsoDays(TODAY, 1); while (dow(d) !== 1) d = addIsoDays(d, 1); return d; })();
 
 type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "proposeChange" | "proposeCodeChange" | "none" };
@@ -150,7 +165,7 @@ const Qs: Q[] = [
   { id: "last-wittekool", cat: "history", turns: ["Wanneer hebben we voor het laatst witte kool gegeten?"], truth: (s) => mealsMatching(s, "witte kool").filter((m) => m.date <= TODAY).map((m) => m.date).pop() ?? "nooit" },
   { id: "count-curry", cat: "history", turns: ["Hoe vaak hebben we al kip curry gegeten?"], truth: (s) => mealsMatching(s, "curry").filter((m) => m.date <= TODAY).map((m) => `${m.date} ${m.title} (${m.who}${m.fromFreezer ? ", potje" : ""})`).join("\n") },
   { id: "last-wed", cat: "history", turns: ["Wat aten we vorige week woensdag?"], truth: (s) => fmtDay(day(s, lastWeekday(3))) },
-  { id: "most-often", cat: "history", turns: ["Welk gerecht hebben we het vaakst gegeten?"], truth: (s) => { const c = new Map<string, number>(); for (const m of s.meals.filter((m) => m.date <= TODAY)) c.set(m.title, (c.get(m.title) ?? 0) + 1); return [...c].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${t}: ${n}`).join("\n") + "\n(per maaltijdregel geteld; varianten van dezelfde naam mogen samen geteld worden, zolang het antwoord de top klopt)"; } },
+  { id: "most-often", cat: "history", turns: ["Welk gerecht hebben we het vaakst gegeten?"], truth: (s) => { const c = new Map<string, Set<string>>(); for (const m of s.meals.filter((m) => m.date <= TODAY)) { const k = m.title.replace(/\s+met\s+\d.*$/i, ""); const e = c.get(k) ?? new Set<string>(); e.add(m.date); c.set(k, e as any); } return [...c].map(([t, e]: any) => [t, e.size] as const).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${t}: ${n} dagen`).join("\n") + "\n(geteld per dag; Robin en Amber apart op dezelfde dag = 1 keer. Een telling die 1 verschilt is ok zolang de top klopt)"; } },
   { id: "robin-alone-oct", cat: "history", turns: ["Wat at Robin in oktober allemaal alleen?"], truth: (s) => s.meals.filter((m) => m.date.startsWith("2026-10") && m.who === "Robin").map((m) => `${m.date} ${m.title}`).join("\n") },
   { id: "tante-sofie", cat: "history", turns: ["Wanneer gingen we eten bij tante Sofie?"], truth: (s) => s.days.filter((d) => /sofie/i.test(d.note ?? "")).map((d) => `${d.date}: ${d.note}`).join("\n") },
   { id: "oct1", cat: "history", turns: ["Wat hebben we op 1 oktober gegeten?"], truth: (s) => fmtDay(day(s, "2026-10-01")) },
@@ -188,7 +203,7 @@ const Qs: Q[] = [
   { id: "how-plan-potje", cat: "app", turns: ["Hoe plan ik een potje uit de diepvries in voor een dag?"], truth: () => "In de planning bij een dag een maaltijd toevoegen als 'Potje diepvries' en een potje kiezen uit de lijst; Samen heeft van beide personen een potje van hetzelfde gerecht nodig; potjes die pas later klaar zijn of al ingepland zijn worden doorgestreept getoond." },
   { id: "how-shopping", cat: "app", turns: ["Hoe komt iets op de boodschappenlijst?"], truth: () => "Twee delen: wat je zelf typt (Zelf toegevoegd) blijft staan; het deel 'Uit je planning' wordt gemaakt uit de ingrediënten van geplande maaltijden van gekozen dagen, gegroepeerd per afdeling (AI kiest afdeling), en vervangen bij opnieuw genereren. Ingrediënten die niet op de lijst moeten of uit de diepvries komen staan er niet op." },
   { id: "how-vleesje", cat: "app", turns: ["Wat betekent het als een recept een vleesje heeft?"], truth: () => "Het recept heeft een open plek voor vlees ([vleesje]); bij het inplannen kies je welk vleesje (uit de diepvries of te kopen) en hoeveel; de titel toont dan bv. 'Bloemkool met 3 Hamburger'." },
-  { id: "how-add-recipe", cat: "app", turns: ["Hoe voeg ik een nieuw recept toe?"], truth: () => "Op de Recepten-pagina via de knop om een recept toe te voegen; titel, tags, ingrediënten (met hoeveelheid/eenheid), bereiding invullen en opslaan." },
+  { id: "how-add-recipe", cat: "app", turns: ["Hoe voeg ik een nieuw recept toe?"], truth: () => "Op de Recepten-pagina via de knop om een recept toe te voegen; titel, tags, ingrediënten (met hoeveelheid/eenheid, per persoon of samen, al dan niet op de boodschappenlijst), of je zelf een vleesje kiest, bereiding, notities en een foto (opladen of link) invullen en opslaan. Extra correcte details uit de app zijn ok." },
   { id: "how-modes", cat: "app", turns: ["Wat zijn die situaties zoals 'tot 18u' boven elke dag?"], truth: () => "Per dag kan je voor Amber en Robin een situatie (dagmodus) kiezen, bv. werkuren of locatie; ze zijn zelf te beheren (toevoegen/hernoemen) en tonen hoe de dag eruitziet; zonder keuze is het 'Thuis'." },
   // data changes: propose (approval card), never "dat kan ik niet"
   { id: "chg-robin-gent", cat: "change-data", turns: ["verander Robin thuis eens naar robin gent"], truth: (s) => `Mag NIET zeggen dat het niet kan. Goed is: proposeChange met setSituation voor Robin naar de situatie met 'Gent' in het label (situaties Robin: ${s.modes.filter((m) => m.who === "robin").map((m) => m.label).join(", ")}) voor een redelijke dag (vandaag ${TODAY} of de dag waar Robin op Thuis staat), OF kort vragen voor welke dag(en).`, expectTool: "proposeChange" },
@@ -271,8 +286,10 @@ async function judge(q: Q, truth: string, answers: string[], calls: ToolCallLog[
   const { text } = await generateText({
     model: openrouter.chat(JUDGE),
     temperature: 0,
-    maxOutputTokens: 400,
-    prompt: `Je beoordeelt een chatbot van een maaltijdplanner-app. Vandaag is ${WD[dow(TODAY)]} ${TODAY}. (Ter controle: ${[1, 2, 3, 4, 5, 6, 7].map((n) => `${addIsoDays(TODAY, n)} = ${WD[dow(addIsoDays(TODAY, n))]}`).join(", ")}.)
+    maxOutputTokens: 900,
+    prompt: `Je beoordeelt een chatbot van een maaltijdplanner-app. Vandaag is ${WD[dow(TODAY)]} ${TODAY}.
+Kalender (juist, gebruik deze en reken zelf geen weekdagen uit): ${CAL}.
+Datums zonder jaar in het antwoord slaan op het juiste jaar; dat is geen fout. Weekdagen in het antwoord komen van de app: tel ze alleen fout als ze tegen de kalender hierboven ingaan.
 Vraag(en) van de gebruiker, in volgorde:
 ${q.turns.map((t, i) => `${i + 1}. ${t}`).join("\n")}
 
@@ -284,13 +301,14 @@ ${truth}
 ${toolNote}
 
 Is het (laatste) antwoord correct? Correct = de kernfeiten kloppen met de waarheid, geen verzonnen of foute feiten, geen belangrijke ontbrekende feiten die de vraag rechtstreeks vraagt. Kleine formuleringsverschillen, extra correcte context en het weglaten van details waar de vraag niet om vraagt zijn ok. Een antwoord dat zegt dat het iets niet kan vinden terwijl de waarheid het bevat, is fout.
-Antwoord ALLEEN met JSON: {"pass": true|false, "reason": "<kort>"}`,
+Denk kort na (max 5 zinnen) en eindig met precies één regel JSON: {"pass": true|false, "reason": "<kort>"}`,
   });
   try {
-    const j = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    const last = text.slice(text.lastIndexOf('{"pass"'));
+    const j = JSON.parse(last.slice(0, last.lastIndexOf("}") + 1));
     return { pass: !!j.pass, reason: String(j.reason ?? "") };
   } catch {
-    const m = text.match(/"pass"\s*:\s*(true|false)/);
+    const m = [...text.matchAll(/"pass"\s*:\s*(true|false)/g)].pop();
     return { pass: m?.[1] === "true", reason: `(raw) ${text.slice(0, 300)}` };
   }
 }

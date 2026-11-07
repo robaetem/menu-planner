@@ -78,6 +78,8 @@ export const OpSchema = z.discriminatedUnion("op", [
     removeIngredients: z.array(name).max(60).optional(),
   }),
   z.object({ op: z.literal("deleteRecipe"), recipe: name, userAskedToDelete: deleteFlag }),
+  z.object({ op: z.literal("setRecipeImage"), recipe: name, imageUrl: z.string().url().max(2000).describe("Link naar een foto (https)") }),
+  z.object({ op: z.literal("clearRecipeImage"), recipe: name, userAskedToDelete: deleteFlag }),
   // lists the user manages
   z.object({ op: z.literal("createTag"), label: name }),
   z.object({ op: z.literal("renameTag"), label: name, newLabel: name }),
@@ -89,6 +91,7 @@ export const OpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("renameShoppingSection"), name, newName: name }),
   z.object({ op: z.literal("deleteShoppingSection"), name, userAskedToDelete: deleteFlag }),
   z.object({ op: z.literal("setIngredientSection"), ingredient: name, section: name }),
+  z.object({ op: z.literal("recomputeShoppingSections") }).describe("Alle ingrediënten opnieuw automatisch in winkelsecties indelen"),
   // shopping list
   z.object({ op: z.literal("addShoppingItems"), items: z.array(name).min(1).max(40).describe("Komen bij 'Zelf toegevoegd'") }),
   z.object({ op: z.literal("checkShoppingItems"), items: z.array(name).min(1).max(40), checked: z.boolean() }),

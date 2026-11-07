@@ -7,6 +7,7 @@ import { formatDayLabel } from "@/lib/date";
 import type { Op } from "@/lib/chat/ops";
 import type { Assignee, IngredientRow } from "@/lib/types";
 import { resolveTitle } from "@/app/(protected)/planning/config";
+import { normalizeRecipeImageUrl } from "@/lib/recipes/images";
 import {
   assignRecipe,
   deleteMeal,
@@ -25,7 +26,7 @@ import { createGroente, deleteGroente, updateGroente } from "@/app/(protected)/d
 import { adjustPotje, createPotje, deletePotje } from "@/app/(protected)/potjes/actions";
 import { createRecipe, updateRecipe, type RecipeInput } from "@/app/(protected)/recepten/actions";
 import { createTag, deleteTag, updateTag } from "@/app/(protected)/recepten/tag-actions";
-import { createCategory, deleteCategory, renameCategory, setIngredientCategory } from "@/app/(protected)/boodschappenlijstje/category-actions";
+import { createCategory, deleteCategory, recomputeCategories, renameCategory, setIngredientCategory } from "@/app/(protected)/boodschappenlijstje/category-actions";
 import { generateShoppingList, saveShoppingDoc } from "@/app/(protected)/boodschappenlijstje/actions";
 import { revalidatePath } from "next/cache";
 
@@ -290,6 +291,21 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
       revalidatePath("/planning");
       return `Recept ${r.title} verwijderd`;
     }
+    case "setRecipeImage":
+    case "clearRecipeImage": {
+      // Only the row changes; the old photo file stays in storage so undo can
+      // point back to it (the screen's actions delete the file).
+      const r = await recipeByTitle(db, op.recipe);
+      const url = op.op === "setRecipeImage" ? normalizeRecipeImageUrl(op.imageUrl) : null;
+      if (op.op === "setRecipeImage" && !url) throw new Error("Dat is geen geldige afbeeldingslink (http of https).");
+      const { error } = await db.from("recipes").update({ image_path: url, updated_at: new Date().toISOString() }).eq("id", r.id);
+      if (error) throw new Error(error.message);
+      revalidatePath("/recepten");
+      return url ? `Foto van ${r.title} aangepast` : `Foto van ${r.title} weggehaald`;
+    }
+    case "recomputeShoppingSections":
+      await recomputeCategories();
+      return "Winkelsecties van de boodschappen opnieuw ingedeeld";
     case "createTag":
       await createTag(op.label);
       return `Tag ${op.label} aangemaakt`;
