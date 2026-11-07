@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   guardrail:
@@ -27,4 +28,18 @@ jobs:
       - name: Check diff
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: npx --yes tsx scripts/guardrail-check.ts "${{ github.event.pull_request.base.sha }}" pr-head "$BRANCH"
+        run: |
+          set +e
+          npx --yes tsx scripts/guardrail-check.ts "${{ github.event.pull_request.base.sha }}" pr-head "$BRANCH" | tee /tmp/guardrail.out
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+        id: check
+      - name: Comment reason on PR
+        if: steps.check.outputs.rc != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: grep -m1 '^guardrail FAILED' /tmp/guardrail.out | cut -c1-1500 | gh pr comment "$PR" --body-file - -R "$GITHUB_REPOSITORY" || true
+      - name: Fail if guardrail failed
+        if: steps.check.outputs.rc != '0'
+        run: exit 1
