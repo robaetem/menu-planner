@@ -126,6 +126,7 @@ jobs:
           TITLE="$(printf '%s\n' "$SUMMARY" | head -n 1 | cut -c1-70)"
           [ -n "$TITLE" ] || TITLE="Wijziging $RUN_ID"
           BODY="$(printf '%s\n' "$SUMMARY" | tail -n +2)"
+          [ -n "$BODY" ] || BODY="$(printf '%s\n' "$SUMMARY" | head -n 1)"
           [ -n "$BODY" ] || BODY="Aangevraagd: $REQUEST"
           git commit -q --amend -m "$TITLE" -m "change: $RUN_ID"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
