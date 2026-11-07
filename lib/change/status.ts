@@ -102,6 +102,16 @@ export async function fetchFacts(kind: "change" | "revert", runId: string, creat
   let deploy: Facts["deploy"] = null;
   if (pr && !pr.merged_at) {
     checks = (await gh<{ check_runs: any[] }>(`/commits/${pr.head.sha}/check-runs?per_page=50`)).check_runs;
+    // The guardrail prints its reason as an annotation; surface it as the check summary.
+    for (const c of checks) {
+      if (/guardrail/i.test(c.name) && c.conclusion === "failure") {
+        try {
+          const ann = await gh<{ message?: string }[]>(`/check-runs/${c.id}/annotations`);
+          const msg = ann.find((a) => a.message)?.message;
+          if (msg) c.output = { ...c.output, summary: msg };
+        } catch {}
+      }
+    }
   } else if (pr?.merge_commit_sha) {
     const s = await gh<{ statuses: { context: string; state: string }[] }>(`/commits/${pr.merge_commit_sha}/status`);
     const v = s.statuses.filter((x) => /vercel/i.test(x.context));
