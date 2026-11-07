@@ -2,6 +2,8 @@ name: app-change
 run-name: change ${{ inputs.run_id }}
 
 on:
+  push:
+    branches: [ci-test/run1]
   workflow_dispatch:
     inputs:
       request:
@@ -26,8 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      RUN_ID: ${{ inputs.run_id }}
-      REQUEST: ${{ inputs.request }}
+      RUN_ID: ${{ inputs.run_id || 'test-5458' }}
+      REQUEST: ${{ inputs.request || 'Verander de titel Diepvries in Diepvries 🧊' }}
       # Dummy public values so `next build` works. No real Supabase/DB secrets exist in this job.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k
       CLERK_SECRET_KEY: sk_test_dummy
@@ -119,8 +121,8 @@ jobs:
           git add -A
           git diff --cached --quiet && { echo "::error::Nothing changed"; exit 1; }
           git commit -q -m "change: $RUN_ID"
-          git fetch -q origin main
-          npx tsx /tmp/guardrail-check.ts origin/main HEAD "change/$RUN_ID"
+          git fetch -q origin lane/ci
+          npx tsx /tmp/guardrail-check.ts origin/lane/ci HEAD "change/$RUN_ID"
           SUMMARY="$(grep -v '^\s*$' /tmp/summary.txt 2>/dev/null | head -n 12 || true)"
           TITLE="$(printf '%s\n' "$SUMMARY" | head -n 1 | cut -c1-70)"
           [ -n "$TITLE" ] || TITLE="Wijziging $RUN_ID"
@@ -130,7 +132,7 @@ jobs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "change/$RUN_ID"
           printf '%s\n\n---\nAanvraag: %s\nRun: %s/%s/actions/runs/%s\n' "$BODY" "$REQUEST" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > /tmp/body.md
-          PR_URL="$(gh pr create --base main --head "change/$RUN_ID" --title "$TITLE" --body-file /tmp/body.md)"
+          PR_URL="$(gh pr create --base lane/ci --head "change/$RUN_ID" --title "$TITLE" --body-file /tmp/body.md)"
           echo "PR: $PR_URL"
           gh pr merge "$PR_URL" --auto --squash
           echo "Auto-merge armed for $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
