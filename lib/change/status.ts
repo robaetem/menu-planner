@@ -17,7 +17,7 @@ export type Facts = {
     merge_commit_sha: string | null;
     head_sha: string;
   } | null;
-  checks: { name: string; status: string; conclusion: string | null; output?: { title?: string | null; summary?: string | null } }[];
+  checks: { id?: number; name: string; status: string; conclusion: string | null; output?: { title?: string | null; summary?: string | null } }[];
   deploy: "success" | "pending" | "failure" | null;
   ageMs: number;
 };
