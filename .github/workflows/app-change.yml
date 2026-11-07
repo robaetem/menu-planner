@@ -121,7 +121,8 @@ jobs:
           git commit -q -m "change: $RUN_ID"
           git fetch -q origin main
           npx tsx /tmp/guardrail-check.ts origin/main HEAD "change/$RUN_ID"
-          SUMMARY="$(grep -v '^\s*$' /tmp/summary.txt 2>/dev/null | head -n 12 || true)"
+          # opencode prints a header line ("> build · model") and tool lines; keep only the answer text.
+          SUMMARY="$(sed 's/\x1b\[[0-9;]*m//g' /tmp/summary.txt 2>/dev/null | grep -vE '^(> |→|←|✱|\$ |\s*$)' | head -n 12 || true)"
           TITLE="$(printf '%s\n' "$SUMMARY" | head -n 1 | cut -c1-70)"
           [ -n "$TITLE" ] || TITLE="Wijziging $RUN_ID"
           BODY="$(printf '%s\n' "$SUMMARY" | tail -n +2)"
