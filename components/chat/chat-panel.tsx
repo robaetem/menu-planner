@@ -273,7 +273,15 @@ export function ChatPanel({
           onSubmit={() => send(input)}
           className="rounded-2xl"
         >
-          <PromptInputTextarea submitOnEnter={false} className="text-base md:text-sm" placeholder="Stel een vraag of vraag een aanpassing…" />
+          <PromptInputTextarea
+            submitOnEnter={false}
+            onKeyDown={(e) => {
+              // Desktop: Enter sends, Shift+Enter is a newline. Touch / small screens: Enter is a newline.
+              if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+              if (window.matchMedia("(pointer: coarse)").matches || !window.matchMedia("(min-width: 768px)").matches) return;
+              e.preventDefault();
+              send(input);
+            }} className="text-base md:text-sm" placeholder="Stel een vraag of vraag een aanpassing…" />
           <PromptInputActions className="justify-end pt-1">
             <Button
               type="button"
