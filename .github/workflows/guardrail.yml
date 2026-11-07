@@ -1,0 +1,30 @@
+name: guardrail
+
+# pull_request_target: the checking script comes from main, never from the PR.
+# The PR head is fetched only as data for `git diff`; nothing from it is executed.
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guardrail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch PR head as data
+        run: git fetch -q origin "pull/${{ github.event.pull_request.number }}/head:pr-head"
+      - name: Check diff
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: npx --yes tsx scripts/guardrail-check.ts "${{ github.event.pull_request.base.sha }}" pr-head "$BRANCH"

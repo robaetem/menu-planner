@@ -1,0 +1,136 @@
+name: app-change
+run-name: change ${{ inputs.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: Wat moet er veranderen (Nederlands)
+        type: string
+        required: true
+      run_id:
+        description: Id van de aanvraag (letters, cijfers, - en _)
+        type: string
+        required: true
+
+# One change at a time (also serialises with app-revert).
+concurrency:
+  group: app-change
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  change:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUN_ID: ${{ inputs.run_id }}
+      REQUEST: ${{ inputs.request }}
+      # Dummy public values so `next build` works. No real Supabase/DB secrets exist in this job.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k
+      CLERK_SECRET_KEY: sk_test_dummy
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: dummy
+      SUPABASE_SECRET_KEY: dummy
+      ALLOWED_EMAILS: ci@example.com
+    steps:
+      - name: Validate input
+        run: |
+          [[ "$RUN_ID" =~ ^[A-Za-z0-9_-]{1,60}$ ]] || { echo "::error::run_id must match [A-Za-z0-9_-]{1,60}"; exit 1; }
+          [ -n "${REQUEST// }" ] || { echo "::error::request is empty"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install coding agent
+        run: npm install -g opencode-ai
+
+      - name: Branch and trusted guardrail copy
+        run: |
+          git config user.name "menu-planner-bot"
+          git config user.email "menu-planner-bot@users.noreply.github.com"
+          git checkout -b "change/$RUN_ID"
+          cp scripts/guardrail-check.ts /tmp/guardrail-check.ts   # agent cannot alter the copy we run later
+
+      - name: Agent, verify, retry
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -uo pipefail
+          verify() {
+            { pnpm lint && pnpm build && npx tsx scripts/test-logic.ts; } > /tmp/verify.log 2>&1
+          }
+          run_agent() { # $1 model, $2 prompt
+            echo "::group::agent $1"
+            opencode run --model "openrouter/$1" "$2" 2>&1 | tail -n 60
+            echo "::endgroup::"
+          }
+          FIRST="Voer deze wijzigingsaanvraag uit in deze repo. Volg CODING_AGENT.md strikt.
+
+          Aanvraag: $REQUEST"
+          run_agent z-ai/glm-5.3-flash "$FIRST"
+          if git diff --quiet && [ -z "$(git ls-files -o --exclude-standard)" ]; then
+            echo "::error::De agent heeft niets veranderd. Aanvraag niet uitgevoerd."; exit 1
+          fi
+          ok=0
+          verify && ok=1
+          fix_prompt() { echo "$FIRST
+
+          Je wijziging faalt in lint/build/tests. Los dit op met een zo klein mogelijke aanpassing. Fouten (einde van het log):
+          $(tail -n 60 /tmp/verify.log)"; }
+          if [ $ok = 0 ]; then
+            run_agent z-ai/glm-5.3-flash "$(fix_prompt)"
+            verify && ok=1
+          fi
+          if [ $ok = 0 ]; then
+            run_agent z-ai/glm-5.3 "$(fix_prompt)"
+            verify && ok=1
+          fi
+          if [ $ok = 0 ]; then
+            echo "::error::lint/build/tests still fail after retries"; tail -n 60 /tmp/verify.log; exit 1
+          fi
+          # Plain-Dutch summary for the PR (title on line 1).
+          git add -A && git reset -q -- .next 2>/dev/null || true
+          DIFF="$(git diff --cached | head -c 30000)"
+          opencode run --model openrouter/z-ai/glm-5.3-flash "Schrijf voor iemand zonder technische kennis, in gewoon Nederlands, wat deze codewijziging doet. Regel 1: korte titel (max 60 tekens, geen aanhalingstekens). Regel 2 leeg. Dan 2 tot 4 korte zinnen over wat er voor de gebruiker verandert. Geef ALLEEN die tekst, pas geen bestanden aan.
+
+          Aanvraag: $REQUEST
+
+          Wijziging:
+          $DIFF" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > /tmp/summary.txt || true
+          git status --short | head -20
+
+      - name: Guardrail (trusted copy), commit, push, PR, auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --quiet && { echo "::error::Nothing changed"; exit 1; }
+          git commit -q -m "change: $RUN_ID"
+          git fetch -q origin main
+          npx tsx /tmp/guardrail-check.ts origin/main HEAD "change/$RUN_ID"
+          SUMMARY="$(grep -v '^\s*$' /tmp/summary.txt 2>/dev/null | head -n 12 || true)"
+          TITLE="$(printf '%s\n' "$SUMMARY" | head -n 1 | cut -c1-70)"
+          [ -n "$TITLE" ] || TITLE="Wijziging $RUN_ID"
+          BODY="$(printf '%s\n' "$SUMMARY" | tail -n +2)"
+          [ -n "$BODY" ] || BODY="Aangevraagd: $REQUEST"
+          git commit -q --amend -m "$TITLE" -m "change: $RUN_ID"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "change/$RUN_ID"
+          printf '%s\n\n---\nAanvraag: %s\nRun: %s/%s/actions/runs/%s\n' "$BODY" "$REQUEST" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > /tmp/body.md
+          PR_URL="$(gh pr create --base main --head "change/$RUN_ID" --title "$TITLE" --body-file /tmp/body.md)"
+          echo "PR: $PR_URL"
+          gh pr merge "$PR_URL" --auto --squash
+          echo "Auto-merge armed for $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
