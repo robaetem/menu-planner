@@ -19,6 +19,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ChatButton } from "@/components/chat/chat-button";
 import { NAV_ITEMS } from "@/components/nav-config";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/logo";
@@ -105,7 +106,9 @@ export function AppShell({
           <div className="md:hidden">
             <Brand collapsedHidden={false} />
           </div>
+          <ChatButton className="ml-auto hidden md:flex" />
           <div className="ml-auto flex items-center gap-1 md:hidden">
+            <ChatButton />
             <ThemeToggle />
             <UserSlot devBypass={devBypass} />
           </div>

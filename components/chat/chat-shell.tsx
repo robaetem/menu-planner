@@ -2,15 +2,14 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { MessageCircle, PanelRightOpen } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { OPEN_CHAT_EVENT } from "@/components/chat/chat-button";
 
 const OPEN_KEY = "menu-chat-open";
 const PANEL_W = 400;
 
-// Desktop (md+): right sidebar, remembered open/closed. Mobile: bubble bottom-left
-// that opens a fullscreen sheet. The panel is portalled to <body> so no ancestor
+// Desktop (md+): right sidebar, remembered open/closed. Mobile: fullscreen sheet.
+// Both are opened from the chat button in the top bar (OPEN_CHAT_EVENT). The panel is portalled to <body> so no ancestor
 // transform can break `fixed`; body padding makes the app shrink next to it.
 export function ChatShell({ userId = "me" }: { userId?: string }) {
   const [mounted, setMounted] = React.useState(false);
@@ -32,6 +31,14 @@ export function ChatShell({ userId = "me" }: { userId?: string }) {
     setSidebarOpen(open);
     localStorage.setItem(OPEN_KEY, open ? "1" : "0");
   }
+
+  const toggleRef = React.useRef(() => {});
+  toggleRef.current = () => (desktop ? setSidebar(!sidebarOpen) : setSheetOpen(true));
+  React.useEffect(() => {
+    const onToggle = () => toggleRef.current();
+    window.addEventListener(OPEN_CHAT_EVENT, onToggle);
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, onToggle);
+  }, []);
 
   const showSidebar = desktop && sidebarOpen;
   React.useEffect(() => {
@@ -60,31 +67,12 @@ export function ChatShell({ userId = "me" }: { userId?: string }) {
         >
           <ChatPanel userId={userId} onClose={() => setSidebar(false)} closeIcon="chevron" />
         </aside>
-      ) : (
-        <Button
-          variant="outline"
-          size="icon"
-          className="fixed right-4 bottom-4 z-40 size-11 rounded-full shadow-md"
-          aria-label="Open assistent"
-          onClick={() => setSidebar(true)}
-        >
-          <PanelRightOpen className="size-5" />
-        </Button>
-      )
+      ) : null
     ) : sheetOpen ? (
       <div className="fixed inset-0 z-[60] bg-background" role="dialog" aria-label="Assistent">
         <ChatPanel userId={userId} onClose={() => setSheetOpen(false)} closeIcon="x" />
       </div>
-    ) : (
-      <Button
-        size="icon"
-        className="fixed bottom-20 left-4 z-50 size-13 rounded-full shadow-lg"
-        aria-label="Open assistent"
-        onClick={() => setSheetOpen(true)}
-      >
-        <MessageCircle className="size-6" />
-      </Button>
-    ),
+    ) : null,
     document.body,
   );
 }
