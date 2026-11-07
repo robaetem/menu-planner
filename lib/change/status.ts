@@ -106,8 +106,8 @@ export async function fetchFacts(kind: "change" | "revert", runId: string, creat
     for (const c of checks) {
       if (/guardrail/i.test(c.name) && c.conclusion === "failure") {
         try {
-          const ann = await gh<{ message?: string }[]>(`/check-runs/${c.id}/annotations`);
-          const msg = ann.find((a) => a.message)?.message;
+          const ann = await gh<{ message?: string; annotation_level?: string }[]>(`/check-runs/${c.id}/annotations`);
+          const msg = ann.find((a) => a.message?.startsWith("guardrail"))?.message ?? ann.find((a) => a.annotation_level === "failure" && a.message)?.message;
           if (msg) c.output = { ...c.output, summary: msg };
         } catch {}
       }
