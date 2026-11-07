@@ -43,6 +43,8 @@ const POLL_MS = 4000;
 export function ChangeRunCard({ runId }: { runId: string }) {
   const [info, setInfo] = React.useState<RunInfo | null>(null);
   const [error, setError] = React.useState(false);
+  // Run is gone (404/400): hide the card instead of hanging on "Status ophalen…".
+  const [gone, setGone] = React.useState(false);
   const [undoing, setUndoing] = React.useState(false);
   // Bumped after an undo so polling restarts even if the last status was final.
   const [pollKey, setPollKey] = React.useState(0);
@@ -50,20 +52,28 @@ export function ChangeRunCard({ runId }: { runId: string }) {
   React.useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     async function poll() {
       try {
         const res = await fetch(`/api/change/${encodeURIComponent(runId)}`, {
           cache: "no-store",
         });
+        if (res.status === 404 || res.status === 400) {
+          if (!cancelled) setGone(true);
+          return;
+        }
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as RunInfo;
         if (cancelled) return;
         setInfo(data);
         setError(false);
+        failures = 0;
         if (FINAL.includes(data.status) && !undoing) return;
       } catch {
         if (cancelled) return;
         setError(true);
+        // Give up after a few failures; the card then says so and a reload retries.
+        if (++failures >= 3) return;
       }
       timer = setTimeout(poll, POLL_MS);
     }
@@ -85,11 +95,13 @@ export function ChangeRunCard({ runId }: { runId: string }) {
     setPollKey((k) => k + 1);
   }
 
+  if (gone) return null;
   const status = info?.status ?? "queued";
   const label = info ? LABELS[status] : error ? "Status ophalen lukt even niet…" : "Status ophalen…";
   const busy = !FINAL.includes(status);
   const bad = status === "blocked" || status === "failed";
-  const detail = bad ? (info?.reason ?? info?.summary) : info?.summary;
+  // A refused or failed run: prefer the agent's own short summary over the generic reason.
+  const detail = bad ? (info?.summary || info?.reason) : info?.summary;
 
   return (
     <div

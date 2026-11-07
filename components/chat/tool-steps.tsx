@@ -13,7 +13,7 @@ export function toolName(part: Part): string | null {
 }
 
 /** Tools with their own card; never folded into the steps group. */
-export const CARD_TOOLS = new Set(["request_change", "proposeChange", "proposeCodeChange"]);
+export const CARD_TOOLS = new Set(["request_change", "proposeChange"]);
 
 const LABELS: Record<string, string> = {
   listFiles: "In de app gekeken",
