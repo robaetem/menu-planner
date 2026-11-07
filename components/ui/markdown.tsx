@@ -13,8 +13,42 @@ export type MarkdownProps = {
   components?: Partial<Components>
 }
 
+const BOLD_ONLY = /^\s*\*\*([^*]+?)\*\*:?\s*$/
+const BLOCK_LINE = /^\s*([-*+]|\d+[.)])\s|^\s*[|>#]|^\s*```/
+
+/** Models often use single newlines. Make bold-only lines headings and give a closing question or exclamation its own paragraph. */
+export function normalizeMarkdown(markdown: string): string {
+  const lines = markdown.split("\n")
+  const out: string[] = []
+  let fence = false
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) fence = !fence
+    if (fence) {
+      out.push(line)
+      continue
+    }
+    const prev = out.length ? out[out.length - 1] : ""
+    const bold = BOLD_ONLY.exec(line)
+    if (bold) {
+      if (prev.trim()) out.push("")
+      out.push(`#### ${bold[1].trim()}`, "")
+      continue
+    }
+    const closing =
+      /[?!]\s*$/.test(line) &&
+      prev.trim() &&
+      !/[?!:]\s*$/.test(prev) &&
+      !BLOCK_LINE.test(line) &&
+      !BLOCK_LINE.test(prev) &&
+      !/^#### /.test(prev)
+    if (closing) out.push("")
+    out.push(line)
+  }
+  return out.join("\n")
+}
+
 function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown)
+  const tokens = marked.lexer(normalizeMarkdown(markdown))
   return tokens.map((token) => token.raw)
 }
 
@@ -68,7 +102,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     <h3 className={cn("mt-1 text-sm font-semibold", className)} {...props} />
   ),
   h4: ({ node: _n, className, ...props }) => (
-    <h4 className={cn("text-sm font-medium", className)} {...props} />
+    <h4 className={cn("-mb-1.5 mt-2 text-sm font-semibold", className)} {...props} />
   ),
   ul: ({ node: _n, className, ...props }) => (
     <ul className={cn("list-disc space-y-1 pl-5 marker:text-muted-foreground", className)} {...props} />

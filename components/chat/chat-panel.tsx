@@ -248,7 +248,7 @@ export function ChatPanel({
           onSubmit={() => send(input)}
           className="rounded-2xl"
         >
-          <PromptInputTextarea placeholder="Stel een vraag of vraag een aanpassing…" />
+          <PromptInputTextarea submitOnEnter={false} className="text-base md:text-sm" placeholder="Stel een vraag of vraag een aanpassing…" />
           <PromptInputActions className="justify-end pt-1">
             <Button
               type="button"
