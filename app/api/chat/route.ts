@@ -9,6 +9,7 @@ export const maxDuration = 60;
 
 const MODEL = "z-ai/glm-5.3-flash";
 const MAX_MESSAGES = 40;
+const MAX_STEPS = 10;
 
 export async function POST(req: Request) {
   const a = await requireHousehold();
@@ -30,7 +31,9 @@ export async function POST(req: Request) {
     system: systemPrompt(todayIso()),
     messages: await convertToModelMessages(messages),
     tools: buildChatTools(a.email),
-    stopWhen: stepCountIs(8),
+    stopWhen: stepCountIs(MAX_STEPS),
+    // The last step may not call tools, so the user always gets a written answer.
+    prepareStep: ({ stepNumber }) => (stepNumber >= MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}),
   });
   return result.toUIMessageStreamResponse();
 }
