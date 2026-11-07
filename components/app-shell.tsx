@@ -62,7 +62,7 @@ export function AppShell({
   const pathname = usePathname();
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="md:h-dvh md:overflow-hidden">
       <Sidebar collapsible="icon" className="border-r">
         <SidebarHeader className="h-14 shrink-0 justify-center border-b px-3 py-0">
           <Brand />
@@ -99,7 +99,7 @@ export function AppShell({
         </SidebarFooter>
       </Sidebar>
 
-      <SidebarInset className="bg-background">
+      <SidebarInset className="bg-background md:h-full md:min-h-0 md:overflow-y-auto md:overscroll-contain">
         {/* Top bar */}
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-md md:px-5">
           <SidebarTrigger className="hidden md:flex" />

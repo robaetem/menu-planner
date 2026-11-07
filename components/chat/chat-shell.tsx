@@ -10,7 +10,7 @@ const PANEL_W = 400;
 
 // Desktop (md+): right sidebar, remembered open/closed. Mobile: fullscreen sheet.
 // Both are opened from the chat button in the top bar (OPEN_CHAT_EVENT). The panel is portalled to <body> so no ancestor
-// transform can break `fixed`; body padding makes the app shrink next to it.
+// transform can break `fixed`; body padding makes the app shrink next to it. On desktop the app shell is h-dvh and the page scrolls inside SidebarInset, so the body never scrolls.
 export function ChatShell({ userId = "me" }: { userId?: string }) {
   const [mounted, setMounted] = React.useState(false);
   const [desktop, setDesktop] = React.useState(false);

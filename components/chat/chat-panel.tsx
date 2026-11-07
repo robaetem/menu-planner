@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
-import { ArrowUp, ChevronRight, Search, Sparkles, Trash2, X } from "lucide-react";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from "ai";
+import { ArrowUp, ChevronRight, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ChatContainerContent,
@@ -19,6 +19,8 @@ import {
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import { ChangeRunCard } from "@/components/chat/change-run-card";
+import { ApprovalCard, type AddToolResult } from "@/components/chat/approval-card";
+import { ToolSteps, isStepPart, toolName } from "@/components/chat/tool-steps";
 
 const SUGGESTIONS = [
   "Welke recepten heb ik?",
@@ -29,12 +31,35 @@ const SUGGESTIONS = [
 
 const transport = new DefaultChatTransport({ api: "/api/chat" });
 
-function ToolPart({ part }: { part: UIMessage["parts"][number] }) {
-  if (!part.type.startsWith("tool-") && part.type !== "dynamic-tool") return null;
-  const p = part as { type: string; toolName?: string; state?: string; output?: unknown };
-  const name = p.type === "dynamic-tool" ? (p.toolName ?? "tool") : p.type.slice(5);
+function ToolPart({
+  part,
+  addToolResult,
+}: {
+  part: UIMessage["parts"][number];
+  addToolResult: AddToolResult;
+}) {
+  const name = toolName(part);
+  if (!name) return null;
+  const p = part as {
+    state?: string;
+    input?: { title?: string; ops?: unknown[]; request?: string };
+    output?: { runId?: string; declined?: boolean; undoId?: string; error?: string };
+    toolCallId: string;
+  };
+  if (name === "proposeChange" || name === "proposeCodeChange") {
+    return (
+      <ApprovalCard
+        tool={name}
+        toolCallId={p.toolCallId}
+        state={p.state}
+        input={p.input}
+        output={p.output}
+        addToolResult={addToolResult}
+      />
+    );
+  }
   if (name === "request_change") {
-    const runId = (p.output as { runId?: string } | undefined)?.runId;
+    const runId = p.output?.runId;
     if (runId) return <ChangeRunCard runId={runId} />;
     if (p.state === "output-error") {
       return <p className="text-xs text-destructive">Wijziging aanvragen mislukte.</p>;
@@ -45,13 +70,46 @@ function ToolPart({ part }: { part: UIMessage["parts"][number] }) {
       </div>
     );
   }
-  const done = p.state === "output-available";
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      {done ? <Search className="size-3" /> : <Loader variant="circular" size="sm" />}
-      <span>{done ? "Opgezocht" : "Opzoeken"}: {name}</span>
-    </div>
-  );
+  return null;
+}
+
+/** Fold runs of consecutive plain tool parts into one collapsed group. */
+function renderParts(m: UIMessage, addToolResult: AddToolResult) {
+  const out: React.ReactNode[] = [];
+  let run: UIMessage["parts"] = [];
+  const flush = (key: number) => {
+    if (run.length) out.push(<ToolSteps key={`s${key}`} parts={run} />);
+    run = [];
+  };
+  m.parts.forEach((part, i) => {
+    if (isStepPart(part)) {
+      run.push(part);
+      return;
+    }
+    flush(i);
+    if (part.type === "text") {
+      if (!part.text) return;
+      out.push(
+        m.role === "user" ? (
+          <MessageContent
+            key={i}
+            className="rounded-2xl rounded-br-md bg-[#F7F7F7] px-3.5 py-2 text-sm text-neutral-900"
+          >
+            {part.text}
+          </MessageContent>
+        ) : (
+          <MessageContent key={i} markdown className="max-w-none rounded-none bg-transparent p-0 text-sm">
+            {part.text}
+          </MessageContent>
+        ),
+      );
+    } else {
+      const el = <ToolPart key={i} part={part} addToolResult={addToolResult} />;
+      out.push(el);
+    }
+  });
+  flush(m.parts.length);
+  return out;
 }
 
 export function ChatPanel({
@@ -64,7 +122,10 @@ export function ChatPanel({
   closeIcon?: "x" | "chevron";
 }) {
   const storageKey = `menu-chat:${userId}`;
-  const { messages, sendMessage, setMessages, status, error } = useChat({ transport });
+  const { messages, sendMessage, setMessages, addToolResult, status, error } = useChat({
+    transport,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+  });
   const [input, setInput] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
 
@@ -120,8 +181,8 @@ export function ChatPanel({
       </header>
 
       <div className="relative min-h-0 flex-1">
-        <ChatContainerRoot className="h-full">
-          <ChatContainerContent className="gap-5 p-4">
+        <ChatContainerRoot className="h-full overscroll-contain">
+          <ChatContainerContent className="gap-5 p-4" scrollClassName="overscroll-contain">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center gap-5 pt-10 text-center">
                 <div className="flex size-11 items-center justify-center rounded-full bg-muted">
@@ -159,30 +220,7 @@ export function ChatPanel({
                         : "flex w-full min-w-0 flex-col gap-2"
                     }
                   >
-                    {m.parts.map((part, i) =>
-                      part.type === "text" ? (
-                        part.text ? (
-                          m.role === "user" ? (
-                            <MessageContent
-                              key={i}
-                              className="rounded-2xl rounded-br-md bg-[#F7F7F7] px-3.5 py-2 text-sm text-neutral-900"
-                            >
-                              {part.text}
-                            </MessageContent>
-                          ) : (
-                            <MessageContent
-                              key={i}
-                              markdown
-                              className="max-w-none rounded-none bg-transparent p-0 text-sm"
-                            >
-                              {part.text}
-                            </MessageContent>
-                          )
-                        ) : null
-                      ) : (
-                        <ToolPart key={i} part={part} />
-                      ),
-                    )}
+                    {renderParts(m, addToolResult as AddToolResult)}
                   </div>
                 </Message>
               ))
