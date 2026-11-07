@@ -15,6 +15,7 @@
     "db:reset": "supabase db reset && node scripts/pull-recipes.mjs"
   },
   "dependencies": {
+    "@ai-sdk/react": "^2.0.288",
     "@base-ui/react": "^1.5.0",
     "@clerk/nextjs": "^7.4.2",
     "@supabase/supabase-js": "^2.49.4",
@@ -25,20 +26,28 @@
     "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
+    "ai": "^5.0.285",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "cn": "^0.5.2",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.17.0",
+    "marked": "^18.1.3",
     "next": "^16.2.6",
     "next-themes": "^0.4.6",
     "react": "^19.1.0",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "shadcn": "^4.10.0",
+    "shiki": "^4.6.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "use-stick-to-bottom": "^1.1.6"
   },
   "devDependencies": {
     "@types/node": "latest",
