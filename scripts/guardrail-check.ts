@@ -95,7 +95,11 @@ function main() {
     : `guardrail ok: ${files.length} file(s) checked`;
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + "\n");
-  if (problems.length) process.exit(1);
+  if (problems.length) {
+    // Annotation text is what the check run shows (and what the API reads) as the reason.
+    console.log(`::error title=guardrail::${summary.replace(/[\r\n]+/g, " ").slice(0, 900)}`);
+    process.exit(1);
+  }
 }
 
 if (process.argv[1]?.endsWith("guardrail-check.ts")) main();
