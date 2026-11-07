@@ -53,12 +53,47 @@ export function ChatShell({ userId = "me" }: { userId?: string }) {
     };
   }, [showSidebar, mounted]);
 
+  // Phone sheet: lock the page behind it (position: fixed because iOS ignores overflow: hidden alone).
+  const locked = !desktop && sheetOpen;
   React.useEffect(() => {
-    document.body.style.overflow = !desktop && sheetOpen ? "hidden" : "";
+    if (!locked) return;
+    const y = window.scrollY;
+    const html = document.documentElement.style;
+    const b = document.body.style;
+    html.overflow = "hidden";
+    b.overflow = "hidden";
+    b.position = "fixed";
+    b.top = `-${y}px`;
+    b.left = "0";
+    b.right = "0";
+    b.width = "100%";
     return () => {
-      document.body.style.overflow = "";
+      html.overflow = "";
+      b.overflow = "";
+      b.position = "";
+      b.top = "";
+      b.left = "";
+      b.right = "";
+      b.width = "";
+      window.scrollTo(0, y);
     };
-  }, [desktop, sheetOpen]);
+  }, [locked]);
+
+  // Follow the visual viewport so the sheet shrinks above the iOS keyboard.
+  const [vv, setVv] = React.useState<{ h: number; top: number } | null>(null);
+  React.useEffect(() => {
+    if (!locked || !window.visualViewport) return;
+    const v = window.visualViewport;
+    const sync = () => setVv({ h: v.height, top: v.offsetTop });
+    sync();
+    v.addEventListener("resize", sync);
+    v.addEventListener("scroll", sync);
+    return () => {
+      v.removeEventListener("resize", sync);
+      v.removeEventListener("scroll", sync);
+      setVv(null);
+    };
+  }, [locked]);
 
   if (!mounted) return null;
 
@@ -77,7 +112,12 @@ export function ChatShell({ userId = "me" }: { userId?: string }) {
         <ChatPanel userId={userId} onClose={() => setSidebar(false)} closeIcon="chevron" />
       </aside>
     ) : sheetOpen ? (
-      <div className="fixed inset-0 z-[60] bg-background" role="dialog" aria-label="Assistent">
+      <div
+        className="fixed inset-x-0 top-0 z-[60] h-dvh overflow-hidden overscroll-none bg-background"
+        style={vv ? { height: vv.h, top: vv.top } : undefined}
+        role="dialog"
+        aria-label="Assistent"
+      >
         <ChatPanel userId={userId} onClose={() => setSheetOpen(false)} closeIcon="x" />
       </div>
     ) : null,
