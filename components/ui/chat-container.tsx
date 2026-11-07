@@ -11,6 +11,7 @@ export type ChatContainerRootProps = {
 export type ChatContainerContentProps = {
   children: React.ReactNode
   className?: string
+  scrollClassName?: string
 } & React.HTMLAttributes<HTMLDivElement>
 
 export type ChatContainerScrollAnchorProps = {
