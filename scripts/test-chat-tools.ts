@@ -58,7 +58,7 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   "./ops": ["*"],
   "@clerk/nextjs/server": ["currentUser"],
 };
-const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale", "node:zlib"]);
+const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale", "node:zlib", "@openrouter/ai-sdk-provider"]);
 for (const file of walk("lib/chat")) {
   const src = readFileSync(file, "utf8");
   for (const m of src.matchAll(/import\s+(type\s+)?(?:\{([^}]*)\}|(\w+))\s+from\s+["']([^"']+)["']/g)) {

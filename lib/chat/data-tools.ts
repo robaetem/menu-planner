@@ -149,7 +149,7 @@ const sortedMeals = (d: DayRow) => [...(d.plan_meals ?? [])].sort((a, b) => a.so
 export const dataTools = {
   getPlanning: tool({
     description:
-      "Planning per dag voor een periode (vroeger of later, max 92 dagen): wat er gegeten wordt, wie mee-eet (Samen/Amber/Robin), potjes uit de diepvries, extra potjes die worden ingevroren, gekozen vleesjes (uit diepvries of kopen), diepvriesgroenten, de situaties van Amber en Robin en de dagnotitie. Elke datum heeft zijn weekdag. Zonder datums: vandaag + 6 dagen. Voor 'wanneer aten we X' of 'hoe vaak': gebruik findMeals.",
+      "Planning per dag voor een periode (vroeger of later, max 92 dagen): wat er gegeten wordt, wie mee-eet (Samen/Amber/Robin), potjes uit de diepvries, extra potjes die worden ingevroren, gekozen vleesjes (uit diepvries of kopen), diepvriesgroenten (met wat er uit de diepvries gereserveerd is en een eventueel tekort, rood in de app), de situaties van Amber en Robin en de dagnotitie. Elke datum heeft zijn weekdag. Zonder datums: vandaag + 6 dagen. Voor 'wanneer aten we X' of 'hoe vaak': gebruik findMeals.",
     inputSchema: z.object({
       from: isoDate.optional().describe("Eerste dag, yyyy-MM-dd"),
       to: isoDate.optional().describe("Laatste dag, yyyy-MM-dd"),
@@ -161,12 +161,36 @@ export const dataTools = {
       if (end < start) end = start;
       const capped = end > addIsoDays(start, MAX_RANGE_DAYS - 1);
       if (capped) end = addIsoDays(start, MAX_RANGE_DAYS - 1);
-      const [rows, mode] = await Promise.all([loadDays(start, end), loadModeLabels()]);
+      // Freezer stock only matters for meals from today on (reservations, tekort).
+      const stock = end >= today ? Promise.all([loadStock(getDb(), "vleesje"), loadStock(getDb(), "groente")]) : Promise.resolve(null);
+      const [rows, mode, st] = await Promise.all([loadDays(start, end), loadModeLabels(), stock.catch(() => null)]);
+      const freezerFor = (mealId: string) => {
+        if (!st) return [];
+        return st.flatMap((s) =>
+          s.demands
+            .filter((d) => d.mealId === mealId)
+            .flatMap((d) => mealStockStatus(s.entries, s.reservations, d.mealId, d.lines))
+            .map((x) => ({
+              wat: x.name,
+              nodig: `${+x.wanted.toFixed(3)}${x.unit ? ` ${x.unit}` : ""}`,
+              gereserveerdUitDiepvries: `${+x.reserved.toFixed(3)}${x.unit ? ` ${x.unit}` : ""}`,
+              ...(x.short > 1e-9 ? { tekort: `${+x.short.toFixed(3)}${x.unit ? ` ${x.unit}` : ""}` } : {}),
+            })),
+        );
+      };
       const byDate = new Map(rows.map((r) => [r.day_date, r]));
       const days = [];
       for (let d = start; d <= end; d = addIsoDays(d, 1)) {
         const r = byDate.get(d);
-        const meals = r ? sortedMeals(r).map(mealView) : [];
+        const meals = r
+          ? sortedMeals(r).map((m) => {
+              const v = mealView(m);
+              const fz = d >= today ? freezerFor(m.id) : [];
+              if (fz.length) v.diepvries = fz;
+              if (fz.some((x) => "tekort" in x)) v.tekort = true;
+              return v;
+            })
+          : [];
         const day: Record<string, unknown> = { date: d, day: dayLabel(d), meals };
         if (r?.amber_mode) day.amber = mode("amber", r.amber_mode);
         if (r?.robin_mode) day.robin = mode("robin", r.robin_mode);
@@ -180,7 +204,7 @@ export const dataTools = {
 
   findMeals: tool({
     description:
-      "Zoek in ALLE geplande en gegeten maaltijden (hele geschiedenis en toekomst) op naam van het gerecht, en in de dagnotities (bv. 'tante Sofie', 'restaurant'). Geeft per gerecht: hoe vaak, eerste keer, laatst gegeten (t.e.m. vandaag) en volgende keer gepland, plus de lijst met datums en wie at. Zonder zoekterm: alle gerechten in de periode, het vaakst eerst (voor 'wat eten we het meest'). Optioneel filteren op wie (Samen/Amber/Robin) of alleen potjes.",
+      "Zoek in ALLE geplande en gegeten maaltijden (hele geschiedenis en toekomst) op naam van het gerecht, en in de dagnotities (bv. 'tante Sofie', 'restaurant'). Geeft per gerecht: hoe vaak, eerste keer, laatst gegeten (t.e.m. vandaag) en volgende keer gepland, plus de lijst met datums en wie at. Zonder zoekterm: alle gerechten in de periode, het vaakst eerst (voor 'wat eten we het meest'), en zonder `from` ook de allereerste maaltijd in de planning. Optioneel filteren op wie (Samen/Amber/Robin) of alleen potjes.",
     inputSchema: z.object({
       search: z.string().max(80).optional().describe("Deel van de gerechtnaam, bv. 'witte kool'"),
       from: isoDate.optional(),
@@ -231,6 +255,7 @@ export const dataTools = {
         .sort((a, b) => b.times - a.times || a.dish.localeCompare(b.dish, "nl"));
       return {
         today: dayLabel(today),
+        ...(hits.length && !f ? { eersteMaaltijdOoit: `${dayLabel(hits[0].date)}: ${hits[0].title}` } : {}),
         totalMeals: hits.length,
         dishes: dishes.slice(0, MAX_ROWS),
         meals: (search || who || onlyPotjes || hits.length <= MAX_ROWS ? hits : [])
@@ -366,14 +391,14 @@ export const dataTools = {
 
       // Potjes: in the freezer now (manual, or cooked before today), and coming (cooked today or later).
       const potjes = new Map<string, { name: string; inFreezer: Record<string, number>; free: Record<string, number>; plannedToEat: string[] }>();
-      const coming: { name: string; who: string; cookedOn: string; eatableFrom: string; plannedToEat?: string }[] = [];
+      const coming: string[] = [];
       for (const p of portions) {
         if (!hit(p.name)) continue;
         const who = p.who === "robin" ? "Robin" : "Amber";
         const cooked = !p.sourceMealId || (!!p.cookOn && p.cookOn < today);
         if (!cooked) {
           if (p.cookOn)
-            coming.push({ name: p.name, who, cookedOn: dayLabel(p.cookOn), eatableFrom: dayLabel(readyOn(p)!), ...(p.eatenOn ? { plannedToEat: dayLabel(p.eatenOn) } : {}) });
+            coming.push(`${p.name} voor ${who}: wordt gekookt op ${dayLabel(p.cookOn)}, in de diepvries vanaf ${dayLabel(readyOn(p)!)}${p.eatenOn ? `, al ingepland op ${dayLabel(p.eatenOn)}` : ""}`);
           continue;
         }
         const k = norm(p.name);
@@ -402,29 +427,41 @@ export const dataTools = {
           .filter((g) => g.inFreezer > 0 || g.reserved.length)
           .map((g) => {
             const reserved = g.reserved.reduce((a, r) => a + r.amount, 0);
-            return { name: g.name, ...(g.unit ? { unit: g.unit } : {}), inFreezer: +g.inFreezer.toFixed(3), free: Math.max(0, +(g.inFreezer - reserved).toFixed(3)), ...(g.reserved.length ? { reservedFor: g.reserved } : {}) };
+            const u = g.unit ? ` ${g.unit}` : "";
+            return {
+              naam: g.name,
+              inDiepvries: `${+g.inFreezer.toFixed(3)}${u}`,
+              vrij: `${Math.max(0, +(g.inFreezer - reserved).toFixed(3))}${u}`,
+              ...(g.reserved.length ? { gereserveerd: g.reserved.map((r) => `${+r.amount.toFixed(3)}${u} voor ${r.meal} op ${r.day}`) } : {}),
+            };
           })
-          .sort((a, b) => a.name.localeCompare(b.name, "nl"));
+          .sort((a, b) => a.naam.localeCompare(b.naam, "nl"));
       };
       const shortages = (s: FreezerStock, kind: string) =>
         s.demands.flatMap((d) =>
           mealStockStatus(s.entries, s.reservations, d.mealId, d.lines)
             .filter((x) => x.short > 1e-9 && hit(x.name))
-            .map((x) => ({ kind, day: dayLabel(d.day), item: x.name, wanted: x.wanted, reserved: x.reserved, short: x.short })),
+            .map((x) => `${dayLabel(d.day)}: ${x.name} (${kind}) ${+x.short.toFixed(3)}${x.unit ? ` ${x.unit}` : ""} tekort; nodig ${+x.wanted.toFixed(3)}, uit de diepvries ${+x.reserved.toFixed(3)}`),
         );
       const potjesList = [...potjes.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
       const total = (w: string) => potjesList.reduce((a, p) => a + p.inFreezer[w], 0);
       return {
         today: dayLabel(today),
         potjes: {
-          totaalInDiepvries: { Robin: total("Robin"), Amber: total("Amber") },
-          perGerecht: potjesList.map((p) => ({ name: p.name, inFreezer: p.inFreezer, free: p.free, ...(p.plannedToEat.length ? { plannedToEat: p.plannedToEat } : {}) })),
+          totaalInDiepvries: `Robin ${total("Robin")}, Amber ${total("Amber")}`,
+          vrijTotaal: `Robin ${potjesList.reduce((a, p) => a + p.free.Robin, 0)}, Amber ${potjesList.reduce((a, p) => a + p.free.Amber, 0)}`,
+          perGerecht: potjesList.map((p) => ({
+            naam: p.name,
+            inDiepvries: `Robin ${p.inFreezer.Robin}, Amber ${p.inFreezer.Amber}`,
+            vrij: `Robin ${p.free.Robin}, Amber ${p.free.Amber}`,
+            ...(p.plannedToEat.length ? { alIngepland: p.plannedToEat } : {}),
+          })),
           nogTeKoken: coming,
         },
         vleesjes: stockView(vStock, () => ""),
         groenten: stockView(gStock, (u) => u),
         tekorten: [...shortages(vStock, "vleesje"), ...shortages(gStock, "groente")],
-        uitleg: "free = niet gereserveerd. Vleesjes en groenten verdwijnen pas uit de diepvries na de dag van de maaltijd; potjes zijn per persoon.",
+        uitleg: "vrij = nog niet ingepland of gereserveerd. Vleesjes en groenten gaan pas van de teller na de dag van de maaltijd; potjes zijn per persoon.",
       };
     },
   }),

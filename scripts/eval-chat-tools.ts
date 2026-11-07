@@ -12,7 +12,8 @@
 import { writeAttempts } from "./eval-env";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, stepCountIs, streamText, tool, type ModelMessage } from "ai";
+import { generateText, streamText, tool, type ModelMessage } from "ai";
+import { chatModel, chatSettings } from "@/lib/chat/model";
 import { z } from "zod";
 import { getDb } from "@/lib/supabase/server";
 import { systemPrompt } from "@/lib/chat/system-prompt";
@@ -39,6 +40,8 @@ type SMeal = { date: string; title: string; who: string; fromFreezer: boolean; e
 type SDay = { date: string; note: string | null; amber: string | null; robin: string | null; meals: SMeal[] };
 async function snapshot() {
   const db = getDb();
+  const [secMap, secs] = await Promise.all([db.from("ingredient_category_map").select("name, category_id"), db.from("ingredient_categories").select("id, name")]);
+  const sections = ((secMap.data ?? []) as any[]).map((m) => ({ name: m.name, section: ((secs.data ?? []) as any[]).find((c) => c.id === m.category_id)?.name ?? "Overig" }));
   const [days, recipes, tags, modes, vleesjes, groenten, res, portions, shop] = await Promise.all([
     db.from("plan_days").select("day_date, note, amber_mode, robin_mode, plan_meals(id, sort, assignee, raw_text, freeform_title, from_freezer, freezer_robin, freezer_amber, template_vleesjes, template_groenten, note, recipe:recipes(title))").order("day_date"),
     db.from("recipes").select("title, tags, has_vleesje, method, notes, base_servings, ingredients(name, amount, unit, scaling, amounts_per_person, include_in_shopping, sort)").order("title"),
@@ -95,6 +98,7 @@ async function snapshot() {
     groenten: byName(stock(groenten.data!, "groente_id", (e) => Number(e.amount))),
     potjes,
     shop: shop.data as any,
+    sections,
   };
 }
 type Snap = Awaited<ReturnType<typeof snapshot>>;
@@ -123,7 +127,7 @@ const ing = (r: any) =>
   [...r.ingredients].sort((a: any, b: any) => a.sort - b.sort).map((i: any) =>
     i.scaling === "per_person" && Object.keys(i.amounts_per_person ?? {}).length
       ? `${i.name} (per persoon: ${Object.entries(i.amounts_per_person).map(([k, v]) => `${k} ${v} ${i.unit}`).join(", ")})`
-      : `${i.amount != null ? (i.scaling === "fixed" ? i.amount : +(i.amount * 2).toFixed(2)) : ""} ${i.unit} ${i.name}`.trim(),
+      : `${i.amount != null ? (i.scaling === "fixed" ? i.amount : +(i.amount * 2).toFixed(2)) : ""} ${i.unit} ${i.name}${i.include_in_shopping === false ? " (komt niet op de boodschappenlijst)" : ""}`.trim(),
   ).join(", ") + " (hoeveelheden voor Samen = 2 personen)";
 const dow = (iso: string) => new Date(`${iso}T12:00:00Z`).getUTCDay();
 const lastWeekday = (wd: number) => { let d = addIsoDays(TODAY, -7); while (dow(d) !== wd) d = addIsoDays(d, 1); return d; };
@@ -157,14 +161,14 @@ const Qs: Q[] = [
   { id: "fz-days", cat: "planning", turns: ["Op welke dagen eten we de komende twee weken een potje uit de diepvries?"], truth: (s) => s.meals.filter((m) => m.fromFreezer && m.date >= TODAY && m.date <= addIsoDays(TODAY, 13)).map((m) => `${m.date} ${m.title} (${m.who})`).join("\n") },
   { id: "amber-modes", cat: "planning", turns: ["Op welke dagen werkt Amber de komende twee weken tot 18u?"], truth: (s) => s.days.filter((d) => d.date >= TODAY && d.date <= addIsoDays(TODAY, 13) && d.amber === "tot 18u").map((d) => d.date).join(", ") },
   { id: "note-today", cat: "planning", turns: ["Staat er een notitie bij vandaag?"], truth: (s) => day(s, TODAY)?.note ?? "geen notitie" },
-  { id: "empty-days", cat: "planning", turns: ["Welke dagen in de komende twee weken hebben nog geen maaltijd?"], truth: (s) => { const out: string[] = []; for (let d = TODAY; d <= addIsoDays(TODAY, 13); d = addIsoDays(d, 1)) if (!day(s, d)?.meals.length) out.push(d); return out.join(", "); } },
+  { id: "empty-days", cat: "planning", turns: ["Welke dagen in de komende twee weken hebben nog geen maaltijd?"], truth: (s) => { const out: string[] = []; for (let d = TODAY; d <= addIsoDays(TODAY, 14); d = addIsoDays(d, 1)) if (!day(s, d)?.meals.length) out.push(d); return `Lege dagen van ${TODAY} t.e.m. ${addIsoDays(TODAY, 14)}: ${out.join(", ") || "geen"}. "Twee weken" mag t.e.m. ${addIsoDays(TODAY, 13)} of ${addIsoDays(TODAY, 14)} gelezen worden.`; } },
   { id: "extra-potjes", cat: "planning", turns: ["Van welke maaltijden maken we de komende 10 dagen extra potjes voor de diepvries?"], truth: (s) => s.meals.filter((m) => m.date >= TODAY && m.date <= addIsoDays(TODAY, 9) && m.extra.robin + m.extra.amber > 0).map((m) => `${m.date} ${m.title}: Robin ${m.extra.robin}, Amber ${m.extra.amber}`).join("\n") },
   { id: "vleesje-plan", cat: "planning", turns: ["Welk vlees eten we bij de bloemkool volgende week en moet ik dat kopen?"], truth: (s) => mealsMatching(s, "bloemkool").filter((m) => m.date >= TODAY).map((m) => `${m.date} ${m.title}: ${JSON.stringify(m.vleesjes)} (source freezer = uit diepvries, buy = kopen)`).join("\n") },
   // history
-  { id: "last-month", cat: "history", turns: ["Wat hebben we vorige maand gegeten?"], truth: (s) => { const { from, to } = prevMonth(); return range(s, from, to); } },
+  { id: "last-month", cat: "history", turns: ["Wat hebben we vorige maand gegeten?"], truth: (s) => { const { from, to } = prevMonth(); const n = s.meals.filter((m) => m.date >= from && m.date <= to).length; return `${n} maaltijdregels (een dag kan er meer hebben, bv. Robin en Amber apart)\n` + range(s, from, to); } },
   { id: "last-wittekool", cat: "history", turns: ["Wanneer hebben we voor het laatst witte kool gegeten?"], truth: (s) => mealsMatching(s, "witte kool").filter((m) => m.date <= TODAY).map((m) => m.date).pop() ?? "nooit" },
   { id: "count-curry", cat: "history", turns: ["Hoe vaak hebben we al kip curry gegeten?"], truth: (s) => mealsMatching(s, "curry").filter((m) => m.date <= TODAY).map((m) => `${m.date} ${m.title} (${m.who}${m.fromFreezer ? ", potje" : ""})`).join("\n") },
-  { id: "last-wed", cat: "history", turns: ["Wat aten we vorige week woensdag?"], truth: (s) => fmtDay(day(s, lastWeekday(3))) },
+  { id: "last-wed", cat: "history", turns: ["Wat aten we vorige week woensdag?"], truth: (s) => `Beide lezingen zijn goed: de laatste woensdag ${fmtDay(day(s, lastWeekday(3)))}\nof de woensdag van de vorige kalenderweek ${fmtDay(day(s, addIsoDays(lastWeekday(3), -7)))}` },
   { id: "most-often", cat: "history", turns: ["Welk gerecht hebben we het vaakst gegeten?"], truth: (s) => { const c = new Map<string, Set<string>>(); for (const m of s.meals.filter((m) => m.date <= TODAY)) { const k = m.title.replace(/\s+met\s+\d.*$/i, ""); const e = c.get(k) ?? new Set<string>(); e.add(m.date); c.set(k, e as any); } return [...c].map(([t, e]: any) => [t, e.size] as const).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${t}: ${n} dagen`).join("\n") + "\n(geteld per dag; Robin en Amber apart op dezelfde dag = 1 keer. Een telling die 1 verschilt is ok zolang de top klopt)"; } },
   { id: "robin-alone-oct", cat: "history", turns: ["Wat at Robin in oktober allemaal alleen?"], truth: (s) => s.meals.filter((m) => m.date.startsWith("2026-10") && m.who === "Robin").map((m) => `${m.date} ${m.title}`).join("\n") },
   { id: "tante-sofie", cat: "history", turns: ["Wanneer gingen we eten bij tante Sofie?"], truth: (s) => s.days.filter((d) => /sofie/i.test(d.note ?? "")).map((d) => `${d.date}: ${d.note}`).join("\n") },
@@ -205,6 +209,9 @@ const Qs: Q[] = [
   { id: "how-vleesje", cat: "app", turns: ["Wat betekent het als een recept een vleesje heeft?"], truth: () => "Het recept heeft een open plek voor vlees ([vleesje]); bij het inplannen kies je welk vleesje (uit de diepvries of te kopen) en hoeveel; de titel toont dan bv. 'Bloemkool met 3 Hamburger'." },
   { id: "how-add-recipe", cat: "app", turns: ["Hoe voeg ik een nieuw recept toe?"], truth: () => "Op de Recepten-pagina via de knop om een recept toe te voegen; titel, tags, ingrediënten (met hoeveelheid/eenheid, per persoon of samen, al dan niet op de boodschappenlijst), of je zelf een vleesje kiest, bereiding, notities en een foto (opladen of link) invullen en opslaan. Extra correcte details uit de app zijn ok." },
   { id: "how-modes", cat: "app", turns: ["Wat zijn die situaties zoals 'tot 18u' boven elke dag?"], truth: () => "Per dag kan je voor Amber en Robin een situatie (dagmodus) kiezen, bv. werkuren of locatie; ze zijn zelf te beheren (toevoegen/hernoemen) en tonen hoe de dag eruitziet; zonder keuze is het 'Thuis'." },
+  { id: "sectie-gehakt", cat: "settings", turns: ["In welke winkelafdeling staat gehakt op de boodschappenlijst?"], truth: (s) => s.sections.filter((x) => /gehakt/i.test(x.name)).map((x) => `${x.name}: ${x.section}`).join("\n") || "niet ingedeeld (Overig)" },
+  { id: "chg-photo", cat: "change-data", turns: ["Zet deze foto bij de zurkelpuree: https://example.com/zurkel.jpg"], truth: () => "proposeChange met setRecipeImage {recipe: (titel met zurkelpuree), imageUrl: https://example.com/zurkel.jpg}.", expectTool: "proposeChange" },
+  { id: "chg-recipe-ing", cat: "change-data", turns: ["Voeg 2 teentjes look toe aan de pittige risotto."], truth: (s) => { const r = recipe(s, "risotto"); return `Recept: ${r?.title}; huidige ingrediënten: ${r ? ing(r) : "?"}. Goed: proposeChange met updateRecipe op die titel die er 2 teentjes look bij zet: addIngredients (look, 2, teen) of, als er al look in zit, updateIngredients die de hoeveelheid verhoogt. Geen delete.`; }, expectTool: "proposeChange" },
   // data changes: propose (approval card), never "dat kan ik niet"
   { id: "chg-robin-gent", cat: "change-data", turns: ["verander Robin thuis eens naar robin gent"], truth: (s) => `Mag NIET zeggen dat het niet kan. Goed is: proposeChange met setSituation voor Robin naar de situatie met 'Gent' in het label (situaties Robin: ${s.modes.filter((m) => m.who === "robin").map((m) => m.label).join(", ")}) voor een redelijke dag (vandaag ${TODAY} of de dag waar Robin op Thuis staat), OF kort vragen voor welke dag(en).`, expectTool: "proposeChange" },
   { id: "chg-robin-mon", cat: "change-data", turns: ["Zet Robin maandag op Gent in plaats van thuis."], truth: (s) => `proposeChange met setSituation date ${NEXT_MON} who Robin en situatie = het label met 'Gent' (${s.modes.filter((m) => m.who === "robin").map((m) => m.label).join(", ")}). Antwoord bevestigt kort.`, expectTool: "proposeChange" },
@@ -214,7 +221,7 @@ const Qs: Q[] = [
   { id: "chg-move", cat: "change-data", turns: ["Schuif de maaltijd van morgen een dag op."], truth: (s) => `Morgen: ${fmtDay(day(s, addIsoDays(TODAY, 1)))}. Goed: proposeChange met moveMeal van ${addIsoDays(TODAY, 1)} naar ${addIsoDays(TODAY, 2)} (geen deleteMeal). Geen maaltijd morgen: dat zeggen.`, expectTool: "proposeChange" },
   { id: "chg-no-delete", cat: "change-data", turns: ["Ik heb geen zin meer in de maaltijd van morgen."], truth: () => "Mag NIET zomaar een delete voorstellen (gebruiker vroeg niet uitdrukkelijk om te verwijderen). Goed: vragen wat ze wil (ander recept, verplaatsen, verwijderen) of een alternatief voorstellen; een proposeChange zonder delete-op is ook ok.", expectTool: "none" },
   // app change: proposal card
-  { id: "change-code", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "proposeCodeChange met een duidelijke beschrijving (knop recept toevoegen groen). Antwoord zegt kort dat het een voorstel is om goed te keuren / dat het gestart is.", expectTool: "proposeCodeChange" },
+  { id: "change-code", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "proposeCodeChange met een duidelijke beschrijving (knop recept toevoegen groen). In de test keurt de gebruiker het meteen goed (runId), dus een kort 'Komt eraan' of 'Zal ik dat doen?' is allebei goed.", expectTool: "proposeCodeChange" },
   // multi-turn
   { id: "mt-tomorrow-ing", cat: "multi", turns: ["Wat eten we morgen?", "En wat heb ik daarvoor nodig?"], truth: (s) => { const d = day(s, addIsoDays(TODAY, 1)); const r = d?.meals[0] ? recipe(s, d.meals[0].title.split(" met ")[0]) : null; return `${fmtDay(d)}\ningrediënten: ${r ? ing(r) : "?"}`; } },
   { id: "mt-kipfilet", cat: "multi", turns: ["Hebben we nog kipfilet in de diepvries?", "Is die al ergens voor ingepland?"], truth: (s) => s.vleesjes.filter((v) => /kipfilet/i.test(v.name)).map(stockLine).join("\n") || "geen kipfilet" },
@@ -261,11 +268,11 @@ async function runQuestion(q: Q, s: Snap) {
   for (const turn of q.turns) {
     messages.push({ role: "user", content: turn });
     const r = streamText({
-      model: openrouter.chat(MODEL),
+      model: chatModel(process.env.OPENROUTER_API_KEY!),
       system: systemPrompt(TODAY),
       messages,
       tools,
-      stopWhen: stepCountIs(8),
+      ...chatSettings,
     });
     await r.consumeStream();
     const st = await r.steps;
@@ -300,6 +307,8 @@ Waarheid uit de database / verwacht gedrag:
 ${truth}
 ${toolNote}
 
+Stijl (bewust, geen fout): de bot antwoordt ultrakort. Bij lijsten mag hij het aantal plus max 5 voorbeelden geven, namen inkorten tot 1-2 woorden, hoeveelheden en notities weglaten tenzij gevraagd. Fout is wel: een verkeerd aantal, een voorbeeld dat niet bestaat, of iets dat ingepland/gereserveerd is "vrij" noemen.
+Bij een wijzigingsvraag: de bot moet het voorstel (proposeChange/proposeCodeChange) aanroepen met de juiste inhoud; de tekst erna mag heel kort zijn ("Zal ik dat doen?" of "Gedaan.").
 Is het (laatste) antwoord correct? Correct = de kernfeiten kloppen met de waarheid, geen verzonnen of foute feiten, geen belangrijke ontbrekende feiten die de vraag rechtstreeks vraagt. Kleine formuleringsverschillen, extra correcte context en het weglaten van details waar de vraag niet om vraagt zijn ok. Een antwoord dat zegt dat het iets niet kan vinden terwijl de waarheid het bevat, is fout.
 Denk kort na (max 5 zinnen) en eindig met precies één regel JSON: {"pass": true|false, "reason": "<kort>"}`,
   });

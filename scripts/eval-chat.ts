@@ -1,6 +1,6 @@
 /* Chat tone + speed eval. Runs the real chat setup (prompt, model, tools) against
  * READ-ONLY production data and records answer, words, time to first token,
- * total time and tools per turn. request_change is stubbed: it never dispatches.
+ * total time and tools per turn. proposeChange/proposeCodeChange are stubbed: nothing is applied or dispatched.
  *
  * Run: corepack pnpm dlx tsx scripts/eval-chat.ts [label] [caseId,caseId,...]
  * Env: reads ../menu-planner/.env.prod.local (Supabase) and .env.local
@@ -125,18 +125,18 @@ async function main() {
   const { todayIso } = await import("../lib/date");
 
   const tools: Record<string, any> = buildChatTools("eval@local");
-  tools.request_change = { ...tools.request_change, execute: async () => ({ runId: "eval-stub" }) };
-  // proposeChange (data changes after the user approves) may not exist yet on
-  // this branch; stub it so the eval covers the intended flow. Never writes.
+  // proposeChange / proposeCodeChange have no execute (the client shows a
+  // "Doen / Niet doen" card). Stub them as approved; nothing is applied.
   const { tool } = await import("ai");
-  const { z } = await import("zod");
-  const proposeDescription =
-    tools.proposeChange?.description ??
-    "Stel een wijziging aan de gegevens voor (recept, planning, diepvries, boodschappen). Er verandert pas iets als de gebruiker het voorstel goedkeurt.";
   tools.proposeChange = tool({
-    description: proposeDescription,
-    inputSchema: tools.proposeChange?.inputSchema ?? z.object({ summary: z.string().describe("Wat er verandert, in één zin") }),
-    execute: async () => ({ proposalId: "eval-stub", status: "wacht op goedkeuring" }),
+    description: tools.proposeChange.description,
+    inputSchema: tools.proposeChange.inputSchema,
+    execute: async () => ({ ok: true, summary: "Gedaan.", undoId: "eval-stub" }),
+  });
+  tools.proposeCodeChange = tool({
+    description: tools.proposeCodeChange.description,
+    inputSchema: tools.proposeCodeChange.inputSchema,
+    execute: async () => ({ runId: "eval-stub" }),
   });
   const model = chatModel(process.env.OPENROUTER_API_KEY!);
 

@@ -9,7 +9,7 @@ const TOPICS = APP_KNOWLEDGE.map((k) => k.topic);
 export const appGuideTools = {
   appGuide: tool({
     description:
-      "Uitleg over hoe de app werkt en waar je wat vindt, in gewone woorden (knoppen, kleuren, stappen). Gebruik dit EERST voor elke 'hoe werkt…', 'hoe doe ik…', 'wat betekent…' of 'waar vind ik…'-vraag, en voordat je een app-wijziging voorstelt; lees pas code als dit het antwoord niet heeft. Kies 1-4 onderwerpen; zonder onderwerp krijg je alles. Onderwerpen: " +
+      "Uitleg over hoe de app werkt en waar je wat vindt, in gewone woorden (knoppen, kleuren, stappen). Alleen als het systeemprompt (HOE DE APP WERKT) een 'hoe werkt…', 'hoe doe ik…', 'wat betekent…' of 'waar vind ik…'-vraag niet dekt; zoek pas in de code (searchCode, readFile) als ook dit het antwoord niet heeft. Kies 1-4 onderwerpen; zonder onderwerp krijg je alles. Onderwerpen: " +
       APP_KNOWLEDGE.map((k) => `${k.topic} (${k.title})`).join("; "),
     inputSchema: z.object({
       topics: z.array(z.string().max(40)).max(8).optional().describe(`Onderwerpen uit: ${TOPICS.join(", ")}`),

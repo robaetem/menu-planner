@@ -16,13 +16,13 @@ export function buildChatTools(_email: string) {
     ...codeTools,
     proposeChange: tool({
       description:
-        "Stel een wijziging aan GEGEVENS voor (planning, situaties, notities, maaltijden, recepten, tags, diepvries, boodschappenlijst). De gebruiker ziet een kaart met `title` en keurt goed of af; pas dan gebeurt het. Gebruik namen zoals de lees-tools ze tonen (exacte receptnaam, situatielabel uit getSettings, datum yyyy-MM-dd). Meerdere stappen = meerdere ops in één voorstel. delete*-ops alleen als de gebruiker uitdrukkelijk vroeg om iets te verwijderen. Resultaat: { ok: true, summary } (gedaan; de gebruiker kan het ongedaan maken), { ok: false, error } (niets veranderd; leg uit waarom) of { declined: true } (afgewezen; doe niets).",
+        "Stel een wijziging aan GEGEVENS voor (planning, situaties, notities, maaltijden, recepten, tags, diepvries, boodschappenlijst). De gebruiker ziet een kaart met `title` en de knoppen Doen / Niet doen; pas na Doen gebeurt het. Schrijf er hooguit 'Zal ik dat doen?' bij. Gebruik namen zoals de lees-tools ze tonen (exacte receptnaam, situatielabel uit getSettings, datum yyyy-MM-dd). Meerdere stappen = meerdere ops in één voorstel. delete*-ops alleen als de gebruiker uitdrukkelijk vroeg om iets te verwijderen. Resultaat: { ok: true, summary } (gedaan; de gebruiker kan het ongedaan maken), { ok: false, error } (niets veranderd; leg uit waarom) of { declined: true } (afgewezen; doe niets).",
       inputSchema: ProposeChangeInput,
       outputSchema: ProposeChangeOutput,
     }),
     proposeCodeChange: tool({
       description:
-        "Stel een wijziging aan de APP zelf voor (uiterlijk, knoppen, teksten, gedrag), niet aan gegevens. De gebruiker keurt goed via een kaart; dan wordt de wijziging gebouwd en gepubliceerd. Lees eerst appGuide zodat je de juiste schermen en woorden noemt. Resultaat: { runId } (gestart; voortgang staat in de kaart), { error } of { declined: true }.",
+        "Stel een wijziging aan de APP zelf voor (uiterlijk, knoppen, teksten, gedrag), niet aan gegevens. De gebruiker ziet een kaart met Doen / Niet doen; na Doen wordt de wijziging gebouwd en gepubliceerd. Neem haar wens over in haar eigen woorden (plus Engels); niets opzoeken is nodig. Resultaat: { runId } (gestart; voortgang staat in de kaart), { error } of { declined: true }.",
       inputSchema: ProposeCodeChangeInput,
       outputSchema: ProposeCodeChangeOutput,
     }),
