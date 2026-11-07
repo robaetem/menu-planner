@@ -65,7 +65,7 @@ export function DiepvriesView({
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">
           <Snowflake className="size-5" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Diepvries</h1>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Diepvries 🧊</h1>
       </div>
 
       <Tabs value={tab} onValueChange={changeTab} className="mt-6 gap-0">
