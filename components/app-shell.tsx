@@ -101,7 +101,7 @@ export function AppShell({
 
       <SidebarInset className="bg-background md:h-full md:min-h-0 md:overflow-y-auto md:overscroll-contain">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-md md:px-5">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-md md:px-5">
           <SidebarTrigger className="hidden md:flex" />
           <div className="md:hidden">
             <Brand collapsedHidden={false} />
