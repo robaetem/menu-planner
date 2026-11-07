@@ -12,6 +12,7 @@ export type RunStatus =
   | "checking"
   | "deploying"
   | "live"
+  | "undoing"
   | "blocked"
   | "failed"
   | "undone";
@@ -30,6 +31,7 @@ const LABELS: Record<RunStatus, string> = {
   checking: "Controleren",
   deploying: "Live zetten",
   live: "Live ✓",
+  undoing: "Ongedaan maken…",
   blocked: "Geblokkeerd",
   failed: "Mislukt",
   undone: "Ongedaan gemaakt",
