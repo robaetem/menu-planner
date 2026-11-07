@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 // App-code changes go through the server tool request_change and ChangeRunCard, not through this card.
@@ -34,6 +35,7 @@ async function post(url: string, body?: unknown) {
 }
 
 export function ApprovalCard({ tool, toolCallId, state, input, output, addToolResult }: Props) {
+  const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [undone, setUndone] = React.useState(false);
@@ -49,6 +51,8 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
     try {
       const res = await post(APPLY_ROUTE, { ops: input?.ops ?? [] });
       await addToolResult({ tool, toolCallId, output: res });
+      // Show the change in the planning behind the chat right away.
+      router.refresh();
     } catch {
       setError("Dat lukte niet. Probeer het straks opnieuw.");
     } finally {
@@ -67,6 +71,7 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
     try {
       await post(`${APPLY_ROUTE}/${encodeURIComponent(output.undoId)}/undo`);
       setUndone(true);
+      router.refresh();
     } catch {
       setError("Ongedaan maken lukte niet.");
     } finally {
