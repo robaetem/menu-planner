@@ -116,15 +116,4 @@ export const ProposeChangeOutput = z.union([
   z.object({ declined: z.literal(true) }),
 ]);
 
-export const ProposeCodeChangeInput = z.object({
-  title: z.string().trim().min(3).max(160).describe("Eén korte Nederlandse zin: wat er aan de app verandert"),
-  request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands"),
-});
-/** The POST /api/change response ({ runId } or { error }), or { declined: true }. */
-export const ProposeCodeChangeOutput = z.union([
-  z.object({ runId: z.string() }),
-  z.object({ error: z.string() }),
-  z.object({ declined: z.literal(true) }),
-]);
-
 export const DELETE_OPS = new Set(OpSchema.options.filter((o) => "userAskedToDelete" in o.shape).map((o) => o.shape.op.value));

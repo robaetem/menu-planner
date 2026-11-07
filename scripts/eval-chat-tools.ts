@@ -3,14 +3,14 @@
  *   corepack pnpm dlx tsx scripts/eval-chat-tools.ts [--only id,id] [--label before] [--concurrency 4]
  *
  * Runs realistic questions (incl. multi-turn) through the same streamText +
- * tools + system prompt as app/api/chat/route.ts. proposeChange and
- * proposeCodeChange are stubbed as "approved" without applying anything (the
- * proposal is validated and shown to the judge). Ground truth comes from raw select queries on a snapshot taken at
+ * tools + system prompt as app/api/chat/route.ts. proposeChange is stubbed as
+ * "approved" and request_change as started, without applying or dispatching
+ * anything (the inputs are shown to the judge). Ground truth comes from raw select queries on a snapshot taken at
  * start (independent of the chat tools); a judge model grades each answer.
  * Every Supabase/GitHub request that is not GET/HEAD throws (scripts/eval-env.ts).
  * Writes docs/eval/<label>.json. Never prints secrets. */
 import { writeAttempts } from "./eval-env";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, streamText, tool, type ModelMessage } from "ai";
 import { chatModel, chatSettings } from "@/lib/chat/model";
@@ -22,7 +22,7 @@ import { addIsoDays, todayIso } from "@/lib/date";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 
 const MODEL = "z-ai/glm-5.3-flash";
-const JUDGE = process.env.EVAL_JUDGE ?? "anthropic/claude-sonnet-4.5";
+const JUDGE = process.env.EVAL_JUDGE ?? "anthropic/claude-sonnet-5.5";
 const args = process.argv.slice(2);
 const arg = (k: string) => {
   const i = args.indexOf(`--${k}`);
@@ -150,7 +150,7 @@ const stockLine = (e: any) => `${e.name}: ${e.amount}${e.unit ? " " + e.unit : "
 const CAL = Array.from({ length: 160 }, (_, i) => addIsoDays(TODAY, i - 130)).map((d) => `${d} ${WD[dow(d)].slice(0, 2)}`).join(", ");
 const NEXT_MON = (() => { let d = addIsoDays(TODAY, 1); while (dow(d) !== 1) d = addIsoDays(d, 1); return d; })();
 
-type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "proposeChange" | "proposeCodeChange" | "none" };
+type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "proposeChange" | "request_change" | "none" };
 const Qs: Q[] = [
   // planning
   { id: "tonight", cat: "planning", turns: ["Wat eten we vanavond?"], truth: (s) => fmtDay(day(s, TODAY)) },
@@ -221,7 +221,8 @@ const Qs: Q[] = [
   { id: "chg-move", cat: "change-data", turns: ["Schuif de maaltijd van morgen een dag op."], truth: (s) => `Morgen: ${fmtDay(day(s, addIsoDays(TODAY, 1)))}. Goed: proposeChange met moveMeal van ${addIsoDays(TODAY, 1)} naar ${addIsoDays(TODAY, 2)} (geen deleteMeal). Geen maaltijd morgen: dat zeggen.`, expectTool: "proposeChange" },
   { id: "chg-no-delete", cat: "change-data", turns: ["Ik heb geen zin meer in de maaltijd van morgen."], truth: () => "Mag NIET zomaar een delete voorstellen (gebruiker vroeg niet uitdrukkelijk om te verwijderen). Goed: vragen wat ze wil (ander recept, verplaatsen, verwijderen) of een alternatief voorstellen; een proposeChange zonder delete-op is ook ok.", expectTool: "none" },
   // app change: proposal card
-  { id: "change-code", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "proposeCodeChange met een duidelijke beschrijving (knop recept toevoegen groen). In de test keurt de gebruiker het meteen goed (runId), dus een kort 'Komt eraan' of 'Zal ik dat doen?' is allebei goed.", expectTool: "proposeCodeChange" },
+  { id: "change-confirm", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "Moet eerst kort vragen 'Zal ik ... groen maken?' (in haar woorden) en request_change NOG NIET aanroepen.", expectTool: "none" },
+  { id: "change-yes", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?", "Ja, doe maar."], truth: () => "Na 'ja' moet request_change aangeroepen zijn (met een duidelijke beschrijving: knop recept toevoegen groen) en zegt de bot kort dat het eraan komt.", expectTool: "request_change" },
   // multi-turn
   { id: "mt-tomorrow-ing", cat: "multi", turns: ["Wat eten we morgen?", "En wat heb ik daarvoor nodig?"], truth: (s) => { const d = day(s, addIsoDays(TODAY, 1)); const r = d?.meals[0] ? recipe(s, d.meals[0].title.split(" met ")[0]) : null; return `${fmtDay(d)}\ningrediënten: ${r ? ing(r) : "?"}`; } },
   { id: "mt-kipfilet", cat: "multi", turns: ["Hebben we nog kipfilet in de diepvries?", "Is die al ergens voor ingepland?"], truth: (s) => s.vleesjes.filter((v) => /kipfilet/i.test(v.name)).map(stockLine).join("\n") || "geen kipfilet" },
@@ -237,7 +238,7 @@ async function runQuestion(q: Q, s: Snap) {
   const base = buildChatTools("eval@local") as Record<string, any>;
   const tools: Record<string, any> = {};
   for (const [name, t] of Object.entries(base)) {
-    if (name === "proposeChange" || name === "proposeCodeChange") {
+    if (name === "proposeChange" || name === "request_change") {
       // Stub: the user "approves", nothing is applied or dispatched.
       tools[name] = tool({
         description: t.description,
@@ -245,7 +246,7 @@ async function runQuestion(q: Q, s: Snap) {
         execute: async (input: any) => {
           calls.push({ name, ms: 0, bytes: 0, input });
           return name === "proposeChange"
-            ? { ok: true, summary: "Gedaan.", undoId: "00000000-0000-0000-0000-000000000000" }
+            ? { ok: true, summary: `Gedaan: ${input.title}`, undoId: "00000000-0000-0000-0000-000000000000" }
             : { runId: "00000000-0000-0000-0000-000000000000" };
         },
       });
@@ -286,7 +287,7 @@ async function runQuestion(q: Q, s: Snap) {
 
 async function judge(q: Q, truth: string, answers: string[], calls: ToolCallLog[]) {
   const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
-  const proposals = calls.filter((c) => c.name.startsWith("propose"));
+  const proposals = calls.filter((c) => c.name === "proposeChange" || c.name === "request_change");
   const toolNote = q.expectTool
     ? `Voorstellen (goedgekeurd door de gebruiker in de test, niets echt uitgevoerd): ${proposals.length ? proposals.map((c) => `${c.name} ${JSON.stringify(c.input)}`).join("\n") : "geen"}`
     : proposals.length ? `FOUT: de bot deed een wijzigingsvoorstel terwijl de vraag alleen om informatie vroeg: ${proposals.map((c) => c.name).join(", ")}` : "";
@@ -308,7 +309,7 @@ ${truth}
 ${toolNote}
 
 Stijl (bewust, geen fout): de bot antwoordt ultrakort. Bij lijsten mag hij het aantal plus max 5 voorbeelden geven, namen inkorten tot 1-2 woorden, hoeveelheden en notities weglaten tenzij gevraagd. Fout is wel: een verkeerd aantal, een voorbeeld dat niet bestaat, of iets dat ingepland/gereserveerd is "vrij" noemen.
-Bij een wijzigingsvraag: de bot moet het voorstel (proposeChange/proposeCodeChange) aanroepen met de juiste inhoud; de tekst erna mag heel kort zijn ("Zal ik dat doen?" of "Gedaan.").
+Bij een wijzigingsvraag: de bot moet proposeChange (gegevens) of, na een ja, request_change (de app zelf) aanroepen met de juiste inhoud; de tekst erna mag heel kort zijn ("Zal ik dat doen?" of "Gedaan.").
 Is het (laatste) antwoord correct? Correct = de kernfeiten kloppen met de waarheid, geen verzonnen of foute feiten, geen belangrijke ontbrekende feiten die de vraag rechtstreeks vraagt. Kleine formuleringsverschillen, extra correcte context en het weglaten van details waar de vraag niet om vraagt zijn ok. Een antwoord dat zegt dat het iets niet kan vinden terwijl de waarheid het bevat, is fout.
 Denk kort na (max 5 zinnen) en eindig met precies één regel JSON: {"pass": true|false, "reason": "<kort>"}`,
   });
@@ -322,7 +323,28 @@ Denk kort na (max 5 zinnen) en eindig met precies één regel JSON: {"pass": tru
   }
 }
 
+/** --rejudge <label>: grade the answers of an earlier run again (e.g. with
+ *  EVAL_JUDGE=<stronger model>), without asking the chat model again. */
+async function rejudge(label: string) {
+  const prev = JSON.parse(readFileSync(`docs/eval/${label}.json`, "utf8"));
+  for (const r of prev.results) {
+    const q = Qs.find((x) => x.id === r.id);
+    if (!q || r.error) continue;
+    const j = await judge(q, r.truth, r.answers, r.calls);
+    if (j.pass !== r.pass) console.log(`${r.pass ? "PASS" : "FAIL"} -> ${j.pass ? "PASS" : "FAIL"} ${r.id}: ${j.reason}`);
+    Object.assign(r, j);
+  }
+  const n = prev.results.length;
+  const pass = prev.results.filter((r: any) => r.pass).length;
+  const within3 = prev.results.filter((r: any) => r.pass && r.steps <= 3).length;
+  Object.assign(prev.summary, { judge: JUDGE, pass, passPct: Math.round((pass / n) * 1000) / 10, passWithin3Steps: within3, passWithin3Pct: Math.round((within3 / n) * 1000) / 10 });
+  console.log(JSON.stringify(prev.summary, null, 2));
+  writeFileSync(`docs/eval/${LABEL}.json`, JSON.stringify(prev, null, 2));
+  process.exit(0);
+}
+
 async function main() {
+  if (arg("rejudge")) return rejudge(arg("rejudge")!);
   const s = await snapshot();
   const qs = Qs.filter((q) => !ONLY || ONLY.includes(q.id));
   const results: any[] = [];
@@ -348,7 +370,7 @@ async function main() {
   const n = results.length;
   const pass = results.filter((r) => r.pass).length;
   const within3 = results.filter((r) => r.pass && r.steps <= 3).length;
-  const allMs = results.flatMap((r) => r.calls.filter((c: ToolCallLog) => !c.name.startsWith("propose")).map((c: ToolCallLog) => c.ms)).sort((a, b) => a - b);
+  const allMs = results.flatMap((r) => r.calls.filter((c: ToolCallLog) => c.name !== "proposeChange" && c.name !== "request_change").map((c: ToolCallLog) => c.ms)).sort((a, b) => a - b);
   const pct = (p: number) => allMs[Math.min(allMs.length - 1, Math.floor(p * allMs.length))] ?? 0;
   const summary = {
     label: LABEL, today: TODAY, model: MODEL, judge: JUDGE, questions: n, pass, passPct: Math.round((pass / n) * 1000) / 10,

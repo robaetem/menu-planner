@@ -1,6 +1,6 @@
 /* Chat tone + speed eval. Runs the real chat setup (prompt, model, tools) against
  * READ-ONLY production data and records answer, words, time to first token,
- * total time and tools per turn. proposeChange/proposeCodeChange are stubbed: nothing is applied or dispatched.
+ * total time and tools per turn. request_change and proposeChange are stubbed: nothing is applied or dispatched.
  *
  * Run: corepack pnpm dlx tsx scripts/eval-chat.ts [label] [caseId,caseId,...]
  * Env: reads ../menu-planner/.env.prod.local (Supabase) and .env.local
@@ -125,18 +125,15 @@ async function main() {
   const { todayIso } = await import("../lib/date");
 
   const tools: Record<string, any> = buildChatTools("eval@local");
-  // proposeChange / proposeCodeChange have no execute (the client shows a
-  // "Doen / Niet doen" card). Stub them as approved; nothing is applied.
+  // request_change would dispatch a real change: stub it. proposeChange has
+  // no execute (the client shows a "Doen / Niet doen" card): stub it as
+  // approved. Nothing is applied or dispatched.
   const { tool } = await import("ai");
+  tools.request_change = { ...tools.request_change, execute: async () => ({ runId: "eval-stub" }) };
   tools.proposeChange = tool({
     description: tools.proposeChange.description,
     inputSchema: tools.proposeChange.inputSchema,
     execute: async () => ({ ok: true, summary: "Gedaan.", undoId: "eval-stub" }),
-  });
-  tools.proposeCodeChange = tool({
-    description: tools.proposeCodeChange.description,
-    inputSchema: tools.proposeCodeChange.inputSchema,
-    execute: async () => ({ runId: "eval-stub" }),
   });
   const model = chatModel(process.env.OPENROUTER_API_KEY!);
 

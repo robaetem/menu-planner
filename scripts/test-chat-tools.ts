@@ -81,10 +81,11 @@ check("data tools are all known read tools", Object.keys(dataTools).every((k) =>
 // Changes are only proposed: the two propose tools have no execute (the client
 // shows an approval card), and no other tool exists besides the read tools.
 const all = buildChatTools("t@t") as Record<string, any>;
-check("only read + propose tools", Object.keys(all).every((k) => READ_TOOLS.includes(k) || k === "proposeChange" || k === "proposeCodeChange"), Object.keys(all));
-check("proposeChange has no execute", typeof all.proposeChange.execute === "undefined");
-check("proposeCodeChange has no execute", typeof all.proposeCodeChange.execute === "undefined");
-check("no request_change tool any more", !("request_change" in all));
+check("only read tools + proposeChange + request_change", Object.keys(all).every((k) => READ_TOOLS.includes(k) || k === "proposeChange" || k === "request_change"), Object.keys(all));
+check("proposeChange has no execute (client approval card)", typeof all.proposeChange.execute === "undefined");
+const toolsSrc = readFileSync("lib/chat/tools.ts", "utf8");
+check("request_change contract {request} -> {runId}", /request:\s*z\.string\(\)/.test(toolsSrc) && /\{\s*runId:\s*r\.runId\s*\}/.test(toolsSrc));
+check("only request_change has a side effect (startChange)", (toolsSrc.match(/startChange\(/g) ?? []).length === 1);
 
 // Op schema: deletes only as delete* ops with userAskedToDelete: true.
 check("delete ops all start with delete/remove/clear", [...DELETE_OPS].every((o) => /^(delete|remove|clear)/.test(o)) && DELETE_OPS.size >= 8, [...DELETE_OPS]);

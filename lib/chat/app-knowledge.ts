@@ -248,7 +248,7 @@ Eerder getypte namen van potjes, vleesjes en groenten blijven als suggestie besc
     text: `De assistent beantwoordt vragen in gewone taal.
 Hij kan alles bekijken: recepten (zoeken op naam, tag of ingrediënt, en één recept volledig), de planning van elke periode, ook vroeger (wat aten we wanneer, hoe vaak), de diepvries met reserveringen en tekorten, het boodschappenlijstje met de herkomst van elke regel, en de tags en situaties.
 Hij kan ook gegevens aanpassen: situaties, dagnotities, maaltijden plannen of verplaatsen, vleesjes en groenten bij een maaltijd, recepten, tags, situaties en winkelsecties beheren, de diepvries bijwerken en het boodschappenlijstje aanvullen of afvinken. Hij toont dan eerst een kaart met wat er verandert; pas als je op goedkeuren tikt gebeurt het. Daarna kan je het met “Ongedaan maken” terugdraaien, zolang niemand dezelfde gegevens intussen nog aanpaste. Verwijderen doet hij alleen als je er uitdrukkelijk om vraagt.
-Hij kan ook een wijziging aan de app zelf laten bouwen (uiterlijk, knoppen, teksten, gedrag). Ook dan zie je eerst een kaart en start het pas na goedkeuren.
+Hij kan ook een wijziging aan de app zelf laten bouwen (uiterlijk, knoppen, teksten, gedrag). Hij vraagt eerst “Zal ik dit aanpassen?”; pas na een duidelijk ja start hij het.
 Je ziet de voortgang: in wachtrij, bezig, gecontroleerd, gepubliceerd, live. Een veiligheidscontrole kan blokkeren.
 Er loopt maar één wijziging tegelijk, en er zijn er maximaal 10 per dag. Een live wijziging kan je ongedaan laten maken.`,
   },

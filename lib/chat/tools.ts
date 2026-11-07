@@ -1,30 +1,38 @@
 import { tool } from "ai";
+import { z } from "zod";
+import { startChange } from "@/lib/change/runs";
 import { appGuideTools } from "./app-guide";
 import { codeTools } from "./code-tools";
 import { dataTools } from "./data-tools";
-import { ProposeChangeInput, ProposeChangeOutput, ProposeCodeChangeInput, ProposeCodeChangeOutput } from "./ops";
+import { ProposeChangeInput, ProposeChangeOutput } from "./ops";
 
-/** All chat tools. Nothing here writes: data and code changes are only PROPOSED.
- *  proposeChange and proposeCodeChange have no execute, so the AI SDK hands
- *  them to the client, which shows an approval card. Only after the user
- *  approves does the client call POST /api/chat/apply (data) or POST
- *  /api/change (code) and return the outcome as the tool result. */
-export function buildChatTools(_email: string) {
+/** All chat tools. Household data is only read here; changes to it are only
+ *  PROPOSED: proposeChange has no execute, so the AI SDK hands it to the
+ *  client, which shows a "Doen / Niet doen" card and, after Doen, calls
+ *  POST /api/chat/apply (journaled, undoable). The only side effect here is
+ *  request_change, which queues an app-code change through lib/change after
+ *  the user said yes in the conversation. */
+export function buildChatTools(email: string) {
   return {
     ...dataTools,
     ...appGuideTools,
     ...codeTools,
     proposeChange: tool({
       description:
-        "Stel een wijziging aan GEGEVENS voor (planning, situaties, notities, maaltijden, recepten, tags, diepvries, boodschappenlijst). De gebruiker ziet een kaart met `title` en de knoppen Doen / Niet doen; pas na Doen gebeurt het. Schrijf er hooguit 'Zal ik dat doen?' bij. Gebruik namen zoals de lees-tools ze tonen (exacte receptnaam, situatielabel uit getSettings, datum yyyy-MM-dd). Meerdere stappen = meerdere ops in één voorstel. delete*-ops alleen als de gebruiker uitdrukkelijk vroeg om iets te verwijderen. Resultaat: { ok: true, summary } (gedaan; de gebruiker kan het ongedaan maken), { ok: false, error } (niets veranderd; leg uit waarom) of { declined: true } (afgewezen; doe niets).",
+        "Stel een wijziging aan GEGEVENS voor (planning, situaties, notities, maaltijden, recepten, tags, diepvries, boodschappenlijst). De gebruiker ziet een kaart met `title` en de knoppen Doen / Niet doen; pas na Doen gebeurt het. Schrijf er hooguit 'Zal ik dat doen?' bij. Gebruik namen zoals de lees-tools ze tonen (exacte receptnaam, situatielabel uit getSettings, datum yyyy-MM-dd). Meerdere stappen = meerdere ops in één voorstel. delete*/remove*/clear*-ops alleen als de gebruiker uitdrukkelijk vroeg om iets te verwijderen. Resultaat: { ok: true, summary } (gedaan; ongedaan maken kan in de kaart), { ok: false, error } (niets veranderd; leg uit waarom) of { declined: true } (niet doen; stel het niet opnieuw voor).",
       inputSchema: ProposeChangeInput,
       outputSchema: ProposeChangeOutput,
     }),
-    proposeCodeChange: tool({
+    request_change: tool({
       description:
-        "Stel een wijziging aan de APP zelf voor (uiterlijk, knoppen, teksten, gedrag), niet aan gegevens. De gebruiker ziet een kaart met Doen / Niet doen; na Doen wordt de wijziging gebouwd en gepubliceerd. Neem haar wens over in haar eigen woorden (plus Engels); niets opzoeken is nodig. Resultaat: { runId } (gestart; voortgang staat in de kaart), { error } of { declined: true }.",
-      inputSchema: ProposeCodeChangeInput,
-      outputSchema: ProposeCodeChangeOutput,
+        "Vraag een wijziging aan de APP (uiterlijk, gedrag, tekst) aan. Alleen aanroepen nadat de gebruiker in dit gesprek expliciet ja heeft gezegd op 'Zal ik dit aanpassen?'. NOOIT voor het wijzigen of verwijderen van gegevens (recepten, planning, diepvries, boodschappen): daarvoor is proposeChange.",
+      inputSchema: z.object({
+        request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands."),
+      }),
+      execute: async ({ request }) => {
+        const r = await startChange(email, request);
+        return r.ok ? { runId: r.runId } : { error: r.error };
+      },
     }),
   };
 }
