@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { startChange } from "@/lib/change/runs";
+import { appGuideTools } from "./app-guide";
 import { codeTools } from "./code-tools";
 import { dataTools } from "./data-tools";
 
@@ -9,6 +10,7 @@ import { dataTools } from "./data-tools";
 export function buildChatTools(email: string) {
   return {
     ...dataTools,
+    ...appGuideTools,
     ...codeTools,
     request_change: tool({
       description:

@@ -20,7 +20,8 @@ const q = (path: string) => `/contents/${path.split("/").map(encodeURIComponent)
 
 export const codeTools = {
   listFiles: tool({
-    description: "Lijst de bestanden en mappen in een map van de app-code (hoofdbranch). Leeg pad = hoofdmap.",
+    description:
+      "Lijst de bestanden en mappen in een map van de app-code (hoofdbranch). Leeg pad = hoofdmap. Alleen nodig als appGuide een vraag over de app niet beantwoordt. Belangrijke mappen: app/(protected)/planning, app/(protected)/recepten, app/(protected)/diepvries, app/(protected)/boodschappenlijstje, lib/freezer, lib/shopping.",
     inputSchema: z.object({ path: z.string().max(200).default("") }),
     execute: async ({ path }) => {
       const p = safePath(path);
@@ -40,7 +41,7 @@ export const codeTools = {
   }),
 
   readFile: tool({
-    description: "Lees één bestand uit de app-code (hoofdbranch). Grote bestanden worden afgekapt.",
+    description: "Lees één bestand uit de app-code (hoofdbranch). Grote bestanden worden afgekapt. Alleen als appGuide het antwoord niet heeft.",
     inputSchema: z.object({ path: z.string().min(1).max(200) }),
     execute: async ({ path }) => {
       const p = safePath(path);

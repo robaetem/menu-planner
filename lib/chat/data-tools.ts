@@ -1,13 +1,63 @@
-// READ-ONLY data tools for the chat. Select-only on a fixed list of tables.
-// No insert/update/delete/upsert/rpc may appear anywhere in lib/chat
-// (enforced by scripts/test-chat-tools.ts).
+// READ-ONLY data tools for the chat. Select-only on a fixed list of tables
+// (CHAT_TABLES). No insert/update/delete/upsert/rpc may appear anywhere in
+// lib/chat, and only allow-listed read helpers may be imported from elsewhere
+// (both enforced by scripts/test-chat-tools.ts).
+//
+// Output is shaped for the model: names, dates with weekday, who eats, no ids.
 import { tool } from "ai";
 import { z } from "zod";
+import { format, parseISO } from "date-fns";
+import { nl } from "date-fns/locale";
 import { getDb } from "@/lib/supabase/server";
-import { addIsoDays } from "@/lib/date";
-import { getRecipe, getShoppingDocs, listGroenten, listPortions, listRecipes, listVleesjes } from "@/lib/data";
+import { addIsoDays, todayIso } from "@/lib/date";
+import { getShoppingDocs, listPortions } from "@/lib/data";
+import { loadStock } from "@/lib/freezer/stock-server";
+import { mealStockStatus, type FreezerStock } from "@/lib/freezer/stock";
+import { readyOn } from "@/lib/freezer/potjes";
+import { resolveTitle } from "@/app/(protected)/planning/config";
+import type { TemplateVleesje } from "@/lib/types";
 
-const MAX_ROWS = 60;
+/** Every table the chat may read. Nothing else, and only with select. */
+export const CHAT_TABLES = [
+  "household",
+  "recipes",
+  "ingredients",
+  "recipe_tags",
+  "plan_days",
+  "plan_meals",
+  "plan_modes",
+  "ingredient_categories",
+] as const;
+type ChatTable = (typeof CHAT_TABLES)[number];
+// Also read, through allow-listed helpers: vleesjes, groenten,
+// freezer_reservations, freezer_portions, shopping_doc.
+
+const from = (t: ChatTable) => getDb().from(t);
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const isoDate = z.string().regex(ISO, "yyyy-MM-dd");
+const MAX_RANGE_DAYS = 92;
+const MAX_ROWS = 80;
+
+/** "za 7 nov 2026" */
+export function dayLabel(iso: string): string {
+  return format(parseISO(iso), "EEEEEE d MMM yyyy", { locale: nl });
+}
+const WHO: Record<string, string> = { both: "Samen", amber: "Amber", robin: "Robin" };
+
+/** Lowercase, no accents, straight quotes: "Z’n Grieks" -> "z'n grieks". */
+export function norm(s: string | null | undefined): string {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[’‘`´]/g, "'")
+    .toLowerCase()
+    .trim();
+}
+/** Every word of `q` occurs in `hay` (like the Recepten search box). */
+export function matchesAll(hay: string, q: string): boolean {
+  const h = norm(hay);
+  return norm(q).split(/\s+/).filter(Boolean).every((w) => h.includes(w) || (w.length > 3 && h.includes(w.replace(/(en|s)$/, ""))));
+}
 
 /** Flatten a TipTap/ProseMirror JSON document to plain lines. */
 export function docToText(node: unknown): string {
@@ -26,133 +76,392 @@ export function docToText(node: unknown): string {
     for (const c of n.content ?? []) walk(c, prefix);
   };
   walk(node);
-  return lines.map((l) => l.trim()).filter(Boolean).join("\n");
+  // A task item's text sits in a nested paragraph: fold "[ ] " + "melk" into one line.
+  const out: string[] = [];
+  for (const l of lines.map((x) => x.trim())) {
+    if (out.length && /^\[[ x]\]$/.test(out[out.length - 1]) && l) out[out.length - 1] += ` ${l}`;
+    else out.push(l);
+  }
+  return out.filter((l) => l && !/^\[[ x]\]$/.test(l)).join("\n");
 }
 
+// ---------- shared loaders ----------
+
+type MealRow = {
+  id: string;
+  sort: number;
+  assignee: string;
+  recipe_id: string | null;
+  raw_text: string;
+  freeform_title: string | null;
+  from_freezer: boolean;
+  freezer_robin: number;
+  freezer_amber: number;
+  template_vleesjes: TemplateVleesje[] | null;
+  template_groenten: { name: string; unit: string; amount: number }[] | null;
+  note: string | null;
+  recipe: { title: string } | null;
+};
+type DayRow = { day_date: string; note: string | null; amber_mode: string | null; robin_mode: string | null; plan_meals: MealRow[] };
+
+const MEAL_SELECT =
+  "id, sort, assignee, recipe_id, raw_text, freeform_title, from_freezer, freezer_robin, freezer_amber, template_vleesjes, template_groenten, note, recipe:recipes(title)";
+
+async function loadDays(fromIso?: string, toIso?: string): Promise<DayRow[]> {
+  let q = from("plan_days").select(`day_date, note, amber_mode, robin_mode, plan_meals(${MEAL_SELECT})`);
+  if (fromIso) q = q.gte("day_date", fromIso);
+  if (toIso) q = q.lte("day_date", toIso);
+  const { data, error } = await q.order("day_date", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as unknown as DayRow[];
+}
+
+async function loadModeLabels(): Promise<(who: "amber" | "robin", v: string | null) => string> {
+  const { data } = await from("plan_modes").select("who, value, label");
+  const m = new Map((data ?? []).map((r: any) => [`${r.who}|${r.value}`, r.label as string]));
+  return (who, v) => (v ? (m.get(`${who}|${v}`) ?? v) : "Thuis");
+}
+
+function mealTitle(m: MealRow): string {
+  return resolveTitle(m.recipe?.title ?? m.freeform_title ?? m.raw_text ?? "Maaltijd", m.template_vleesjes).trim();
+}
+
+function mealView(m: MealRow) {
+  const v: Record<string, unknown> = {
+    title: mealTitle(m),
+    who: WHO[m.assignee] ?? m.assignee,
+    kind: m.from_freezer ? "potje uit de diepvries" : m.recipe_id ? "gerecht (koken)" : "vrije tekst",
+  };
+  if (m.freezer_robin || m.freezer_amber) v.extraPotjesInvriezen = { Robin: m.freezer_robin, Amber: m.freezer_amber };
+  const vl = (m.template_vleesjes ?? []).filter((x) => x.count > 0);
+  if (vl.length) v.vleesjes = vl.map((x) => `${x.count} ${x.name} (${x.source === "buy" ? "kopen" : "uit diepvries"})`);
+  const gr = m.template_groenten ?? [];
+  if (gr.length) v.groentenUitDiepvries = gr.map((g) => `${g.amount} ${g.unit} ${g.name}`);
+  if (m.note) v.note = m.note;
+  return v;
+}
+
+const sortedMeals = (d: DayRow) => [...(d.plan_meals ?? [])].sort((a, b) => a.sort - b.sort);
+
+// ---------- tools ----------
+
 export const dataTools = {
-  listRecipes: tool({
-    description: "Zoek recepten (alleen titel, tags, bereidingstijd). Zonder zoekterm: de nieuwste.",
-    inputSchema: z.object({ search: z.string().max(80).optional() }),
-    execute: async ({ search }) => {
-      const all = await listRecipes();
-      const q = search?.trim().toLowerCase();
-      const hits = q
-        ? all.filter((r) => r.title.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q)))
-        : all;
+  getPlanning: tool({
+    description:
+      "Planning per dag voor een periode (vroeger of later, max 92 dagen): wat er gegeten wordt, wie mee-eet (Samen/Amber/Robin), potjes uit de diepvries, extra potjes die worden ingevroren, gekozen vleesjes (uit diepvries of kopen), diepvriesgroenten, de situaties van Amber en Robin en de dagnotitie. Elke datum heeft zijn weekdag. Zonder datums: vandaag + 6 dagen. Voor 'wanneer aten we X' of 'hoe vaak': gebruik findMeals.",
+    inputSchema: z.object({
+      from: isoDate.optional().describe("Eerste dag, yyyy-MM-dd"),
+      to: isoDate.optional().describe("Laatste dag, yyyy-MM-dd"),
+    }),
+    execute: async ({ from: f, to: t }) => {
+      const today = todayIso();
+      const start = f ?? today;
+      let end = t ?? addIsoDays(start, 6);
+      if (end < start) end = start;
+      const capped = end > addIsoDays(start, MAX_RANGE_DAYS - 1);
+      if (capped) end = addIsoDays(start, MAX_RANGE_DAYS - 1);
+      const [rows, mode] = await Promise.all([loadDays(start, end), loadModeLabels()]);
+      const byDate = new Map(rows.map((r) => [r.day_date, r]));
+      const days = [];
+      for (let d = start; d <= end; d = addIsoDays(d, 1)) {
+        const r = byDate.get(d);
+        const meals = r ? sortedMeals(r).map(mealView) : [];
+        const day: Record<string, unknown> = { date: d, day: dayLabel(d), meals };
+        if (r?.amber_mode) day.amber = mode("amber", r.amber_mode);
+        if (r?.robin_mode) day.robin = mode("robin", r.robin_mode);
+        if (r?.note) day.note = r.note;
+        if (!meals.length) day.empty = true;
+        days.push(day);
+      }
+      return { today: dayLabel(today), from: start, to: end, ...(capped ? { capped: `max ${MAX_RANGE_DAYS} dagen` } : {}), days };
+    },
+  }),
+
+  findMeals: tool({
+    description:
+      "Zoek in ALLE geplande en gegeten maaltijden (hele geschiedenis en toekomst) op naam van het gerecht. Geeft per gerecht: hoe vaak, eerste keer, laatst gegeten (t.e.m. vandaag) en volgende keer gepland, plus de lijst met datums en wie at. Zonder zoekterm: alle gerechten in de periode, het vaakst eerst (voor 'wat eten we het meest'). Optioneel filteren op wie (Samen/Amber/Robin) of alleen potjes.",
+    inputSchema: z.object({
+      search: z.string().max(80).optional().describe("Deel van de gerechtnaam, bv. 'witte kool'"),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+      who: z.enum(["Samen", "Amber", "Robin"]).optional().describe("Alleen maaltijden in dat vak"),
+      onlyPotjes: z.boolean().optional().describe("Alleen potjes uit de diepvries"),
+    }),
+    execute: async ({ search, from: f, to: t, who, onlyPotjes }) => {
+      const today = todayIso();
+      const rows = await loadDays(f, t);
+      const hits: { date: string; title: string; who: string; potje: boolean }[] = [];
+      for (const d of rows)
+        for (const m of sortedMeals(d)) {
+          const title = mealTitle(m);
+          if (search && !matchesAll(`${title} ${m.raw_text ?? ""}`, search)) continue;
+          if (who && WHO[m.assignee] !== who) continue;
+          if (onlyPotjes && !m.from_freezer) continue;
+          hits.push({ date: d.day_date, title, who: WHO[m.assignee] ?? m.assignee, potje: m.from_freezer });
+        }
+      // Group by dish: the recipe part of the title (before " met <vleesjes>").
+      const groups = new Map<string, { dish: string; times: number; dates: string[] }>();
+      for (const h of hits) {
+        const key = norm(h.title.replace(/\s+met\s+\d.*$/i, ""));
+        const g = groups.get(key) ?? { dish: h.title.replace(/\s+met\s+\d.*$/i, ""), times: 0, dates: [] };
+        // Two single potjes (Robin + Amber) on one day count as one meal.
+        if (!g.dates.includes(h.date)) {
+          g.times++;
+          g.dates.push(h.date);
+        }
+        groups.set(key, g);
+      }
+      const dishes = [...groups.values()]
+        .map((g) => {
+          const past = g.dates.filter((d) => d <= today);
+          const future = g.dates.filter((d) => d > today);
+          return {
+            dish: g.dish,
+            times: g.times,
+            timesUntilToday: past.length,
+            first: dayLabel(g.dates[0]),
+            ...(past.length ? { lastUntilToday: dayLabel(past[past.length - 1]) } : {}),
+            ...(future.length ? { nextPlanned: dayLabel(future[0]) } : {}),
+          };
+        })
+        .sort((a, b) => b.times - a.times || a.dish.localeCompare(b.dish, "nl"));
       return {
-        total: hits.length,
-        recipes: hits.slice(0, MAX_ROWS).map((r) => ({
-          id: r.id,
-          title: r.title,
-          tags: r.tags,
-          prepMinutes: r.prep_minutes,
-          freezerFriendly: r.freezer_friendly,
-          lastCookedOn: r.last_cooked_on,
-        })),
+        today: dayLabel(today),
+        totalMeals: hits.length,
+        dishes: dishes.slice(0, MAX_ROWS),
+        meals: (search || who || onlyPotjes || hits.length <= MAX_ROWS ? hits : [])
+          .slice(-MAX_ROWS)
+          .map((h) => ({ day: dayLabel(h.date), title: h.title, who: h.who, ...(h.potje ? { potje: true } : {}) })),
+        ...(hits.length > MAX_ROWS ? { note: `Alleen de laatste ${MAX_ROWS} maaltijden staan in 'meals'.` } : {}),
       };
+    },
+  }),
+
+  listRecipes: tool({
+    description:
+      "Zoek recepten op naam, tag of ingrediënt (alle woorden moeten voorkomen in naam, tags of ingrediënten). Geeft naam, tags, of je zelf een vleesje kiest, en hoe vaak/wanneer het gerecht ingepland was en weer is. Zonder zoekterm: alle recepten (totaal = aantal recepten). Gebruik `tag` voor een exacte tag (bv. 'Snel', 'Geen verse groenten nodig') en `neverPlanned` voor recepten die nog nooit in de planning stonden.",
+    inputSchema: z.object({
+      search: z.string().max(80).optional().describe("Woorden uit naam, tag of ingrediënt, bv. 'scampi'"),
+      tag: z.string().max(60).optional().describe("Exacte tag (label), bv. 'Snel'"),
+      ingredient: z.string().max(60).optional().describe("Alleen recepten met dit ingrediënt"),
+      neverPlanned: z.boolean().optional(),
+    }),
+    execute: async ({ search, tag, ingredient, neverPlanned }) => {
+      const today = todayIso();
+      const [recipes, tags, meals] = await Promise.all([
+        from("recipes").select("id, title, tags, has_vleesje, ingredients(name)").order("title"),
+        from("recipe_tags").select("value, label"),
+        from("plan_meals").select("recipe_id, raw_text, freeform_title, day:plan_days(day_date)"),
+      ]);
+      if (recipes.error) return { error: "Recepten ophalen mislukt" };
+      const label = new Map((tags.data ?? []).map((t: any) => [t.value, t.label as string]));
+      const tagLabels = (r: any) => (r.tags as string[]).map((t) => label.get(t) ?? t);
+      // Planned dates per recipe: linked meals, plus potje meals whose name starts with the title.
+      const planned = (r: any) => {
+        const t = norm(r.title);
+        return (meals.data ?? [])
+          .filter((m: any) => m.recipe_id === r.id || (!m.recipe_id && norm(m.freeform_title ?? m.raw_text).startsWith(t)))
+          .map((m: any) => m.day?.day_date as string)
+          .filter(Boolean)
+          .sort();
+      };
+      let list = (recipes.data ?? []) as any[];
+      if (tag) list = list.filter((r) => [...tagLabels(r), ...r.tags].some((x: string) => norm(x) === norm(tag)));
+      if (ingredient) list = list.filter((r) => r.ingredients.some((i: any) => matchesAll(i.name, ingredient)));
+      if (search)
+        list = list.filter((r) => matchesAll([r.title, ...tagLabels(r), ...r.tags, ...r.ingredients.map((i: any) => i.name)].join(" | "), search));
+      const out = list.map((r) => {
+        const dates = [...new Set(planned(r))];
+        const past = dates.filter((d) => d <= today);
+        const future = dates.filter((d) => d > today);
+        const row: Record<string, unknown> = { title: r.title, tags: tagLabels(r), timesPlanned: dates.length };
+        if (r.has_vleesje || /\[vleesje\]/i.test(r.title)) row.vleesjeKiezen = true;
+        if (past.length) row.lastPlanned = dayLabel(past[past.length - 1]);
+        if (future.length) row.nextPlanned = dayLabel(future[0]);
+        const q = ingredient ?? search;
+        if (q) {
+          const hit = r.ingredients.filter((i: any) => matchesAll(i.name, q)).map((i: any) => i.name);
+          if (hit.length) row.matchingIngredients = hit;
+        }
+        return row;
+      });
+      const filtered = neverPlanned ? out.filter((r) => r.timesPlanned === 0) : out;
+      return { total: filtered.length, recipes: filtered.slice(0, MAX_ROWS) };
     },
   }),
 
   getRecipe: tool({
-    description: "Haal één recept volledig op (ingrediënten, bereiding) met id of (deel van de) titel.",
-    inputSchema: z.object({ id: z.string().uuid().optional(), title: z.string().max(120).optional() }),
-    execute: async ({ id, title }) => {
-      let r = id ? await getRecipe(id) : null;
-      if (!r && title) {
-        const q = title.trim().toLowerCase();
-        const all = await listRecipes();
-        r = all.find((x) => x.title.toLowerCase() === q) ?? all.find((x) => x.title.toLowerCase().includes(q)) ?? null;
-      }
-      if (!r) return { error: "Recept niet gevonden" };
-      return {
-        id: r.id,
-        title: r.title,
-        tags: r.tags,
-        baseServings: r.base_servings,
-        prepMinutes: r.prep_minutes,
-        method: r.method,
-        notes: r.notes,
-        ingredients: r.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit })),
+    description:
+      "Eén recept volledig: ingrediënten met hoeveelheden (voor 2 personen samen, of per persoon), wat niet op het boodschappenlijstje komt, bereiding, notities, tags en wanneer het ingepland was/is. Zoek op (deel van) de naam; bij twijfel staan andere kandidaten in otherMatches.",
+    inputSchema: z.object({ title: z.string().min(1).max(120).describe("(Deel van) de receptnaam") }),
+    execute: async ({ title }) => {
+      const [recipes, tags] = await Promise.all([
+        from("recipes").select("id, title, tags, has_vleesje, base_servings, method, notes, ingredients(name, unit, scaling, amount, amount_max, amounts_per_person, include_in_shopping, sort)"),
+        from("recipe_tags").select("value, label"),
+      ]);
+      if (recipes.error) return { error: "Recept ophalen mislukt" };
+      const all = (recipes.data ?? []) as any[];
+      const q = norm(title);
+      const score = (r: any) => {
+        const t = norm(r.title);
+        return t === q ? 4 : t.startsWith(q) ? 3 : t.includes(q) ? 2 : matchesAll(r.title, title) ? 1 : 0;
       };
-    },
-  }),
-
-  getPlanning: tool({
-    description: "De planning (maaltijden per dag) van een datumbereik, yyyy-MM-dd. Maximaal 60 dagen.",
-    inputSchema: z.object({
-      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    }),
-    execute: async ({ from, to }) => {
-      const end = to > addIsoDays(from, 60) ? addIsoDays(from, 60) : to;
-      const { data, error } = await getDb()
-        .from("plan_days")
-        .select("day_date, note, amber_mode, robin_mode, plan_meals(freeform_title, raw_text, from_freezer, diner_keys, note, sort, recipe:recipes(title))")
-        .gte("day_date", from)
-        .lte("day_date", end)
-        .order("day_date", { ascending: true });
-      if (error) return { error: "Planning ophalen mislukt" };
+      const ranked = all.map((r) => ({ r, s: score(r) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.r.title.length - b.r.title.length);
+      if (!ranked.length) return { error: `Geen recept gevonden voor "${title}"`, hint: "Probeer listRecipes met een kortere zoekterm." };
+      const r = ranked[0].r;
+      const { data: meals } = await from("plan_meals").select("day:plan_days(day_date)").eq("recipe_id", r.id);
+      const today = todayIso();
+      const dates = [...new Set((meals ?? []).map((m: any) => m.day?.day_date as string).filter(Boolean))].sort();
+      const label = new Map((tags.data ?? []).map((t: any) => [t.value, t.label as string]));
+      const qty = (a: number | null, max: number | null, unit: string) =>
+        a == null ? unit || null : `${+(a * 2).toFixed(2)}${max != null ? `-${+(max * 2).toFixed(2)}` : ""}${unit ? ` ${unit}` : ""}`;
+      const ingredients = [...r.ingredients]
+        .sort((a: any, b: any) => a.sort - b.sort)
+        .map((i: any) => {
+          const row: Record<string, unknown> = { name: i.name };
+          const per = i.amounts_per_person ?? {};
+          if (i.scaling === "per_person" && Object.keys(per).length) {
+            row.perPerson = Object.entries(per).map(([k, v]) => `${k === "amber" ? "Amber" : k === "robin" ? "Robin" : k} ${v}${i.unit ? ` ${i.unit}` : ""}`).join(", ");
+          } else if (i.scaling === "fixed") {
+            row.amount = i.amount == null ? i.unit || null : `${i.amount}${i.unit ? ` ${i.unit}` : ""} (vast)`;
+          } else {
+            row.amountSamen = qty(i.amount, i.amount_max, i.unit);
+          }
+          if (!i.include_in_shopping) row.nietOpBoodschappenlijst = true;
+          return row;
+        });
       return {
-        days: (data ?? []).map((d: any) => ({
-          date: d.day_date,
-          note: d.note,
-          amberMode: d.amber_mode,
-          robinMode: d.robin_mode,
-          meals: [...(d.plan_meals ?? [])]
-            .sort((a: any, b: any) => a.sort - b.sort)
-            .map((m: any) => ({
-              title: m.recipe?.title ?? m.freeform_title ?? m.raw_text,
-              fromFreezer: m.from_freezer,
-              diners: m.diner_keys,
-              note: m.note,
-            })),
-        })),
+        title: r.title,
+        tags: (r.tags as string[]).map((t) => label.get(t) ?? t),
+        ...(r.has_vleesje || /\[vleesje\]/i.test(r.title) ? { vleesjeKiezen: "het vlees kies je bij het inplannen" } : {}),
+        hoeveelheden: "amountSamen = voor Robin en Amber samen (2 porties); één persoon = de helft",
+        ingredients,
+        method: r.method || null,
+        notes: r.notes || null,
+        planned: {
+          times: dates.length,
+          last: dates.filter((d) => d <= today).map(dayLabel).pop() ?? null,
+          next: dates.filter((d) => d > today).map(dayLabel)[0] ?? null,
+        },
+        ...(ranked.length > 1 ? { otherMatches: ranked.slice(1, 6).map((x) => x.r.title) } : {}),
       };
     },
   }),
 
   getFreezer: tool({
-    description: "De diepvries: vleesjes, groenten en potjes, met wat er al voor geplande maaltijden gereserveerd is.",
-    inputSchema: z.object({}),
-    execute: async () => {
+    description:
+      "De diepvries nu: potjes per gerecht en per persoon (hoeveel erin, hoeveel al ingepland om op te eten en wanneer, en potjes die nog gekookt worden), vleesjes en groenten (hoeveel erin, hoeveel vrij, gereserveerd voor welke maaltijd op welke dag) en tekorten voor geplande maaltijden. Optioneel `search` op naam.",
+    inputSchema: z.object({ search: z.string().max(60).optional().describe("Bv. 'hamburger' of 'quiche'") }),
+    execute: async ({ search }) => {
+      const today = todayIso();
       const db = getDb();
-      const [vleesjes, groenten, portions, res] = await Promise.all([
-        listVleesjes(),
-        listGroenten(),
-        listPortions(),
-        db
-          .from("freezer_reservations")
-          .select("amount, vleesje_id, groente_id, meal:plan_meals(freeform_title, raw_text, recipe:recipes(title), day:plan_days(day_date))")
-          .is("settled_at", null),
-      ]);
-      const reservations = ((res.data ?? []) as any[]).map((r) => ({
-        itemId: r.vleesje_id ?? r.groente_id,
-        amount: r.amount,
-        meal: r.meal?.recipe?.title ?? r.meal?.freeform_title ?? r.meal?.raw_text,
-        day: r.meal?.day?.day_date,
-      }));
-      const reservedFor = (id: string) => reservations.filter((r) => r.itemId === id).map(({ amount, meal, day }) => ({ amount, meal, day }));
-      const potjes: Record<string, { robin: number; amber: number; planned: number }> = {};
+      const [portions, vStock, gStock] = await Promise.all([listPortions(), loadStock(db, "vleesje"), loadStock(db, "groente")]);
+      const hit = (name: string) => !search || matchesAll(name, search);
+
+      // Potjes: in the freezer now (manual, or cooked before today), and coming (cooked today or later).
+      const potjes = new Map<string, { name: string; inFreezer: Record<string, number>; free: Record<string, number>; plannedToEat: string[] }>();
+      const coming: { name: string; who: string; cookedOn: string; eatableFrom: string; plannedToEat?: string }[] = [];
       for (const p of portions) {
-        const e = (potjes[p.name] ??= { robin: 0, amber: 0, planned: 0 });
-        if (p.eatenByMealId) e.planned++;
-        else e[p.who]++;
+        if (!hit(p.name)) continue;
+        const who = p.who === "robin" ? "Robin" : "Amber";
+        const cooked = !p.sourceMealId || (!!p.cookOn && p.cookOn < today);
+        if (!cooked) {
+          if (p.cookOn)
+            coming.push({ name: p.name, who, cookedOn: dayLabel(p.cookOn), eatableFrom: dayLabel(readyOn(p)!), ...(p.eatenOn ? { plannedToEat: dayLabel(p.eatenOn) } : {}) });
+          continue;
+        }
+        const k = norm(p.name);
+        const e = potjes.get(k) ?? { name: p.name, inFreezer: { Robin: 0, Amber: 0 }, free: { Robin: 0, Amber: 0 }, plannedToEat: [] };
+        e.inFreezer[who]++;
+        if (p.eatenOn) e.plannedToEat.push(`${who} op ${dayLabel(p.eatenOn)}`);
+        else e.free[who]++;
+        potjes.set(k, e);
       }
+
+      // Vleesjes/groenten: reservations whose day has passed are already eaten
+      // (the app books them off on the next page load): leave them out here.
+      const stockView = (s: FreezerStock, unitOf: (u: string) => string) => {
+        const eaten = (id: string) => s.reservations.filter((r) => r.entryId === id && r.day < today).reduce((a, r) => a + r.amount, 0);
+        const groups = new Map<string, { name: string; unit: string; inFreezer: number; reserved: { day: string; meal: string; amount: number }[] }>();
+        for (const e of s.entries) {
+          if (!hit(e.name)) continue;
+          const k = `${norm(e.name)}|${e.unit}`;
+          const g = groups.get(k) ?? { name: e.name, unit: unitOf(e.unit), inFreezer: 0, reserved: [] };
+          g.inFreezer += Math.max(0, e.amount - eaten(e.id));
+          for (const r of s.reservations.filter((x) => x.entryId === e.id && x.day >= today))
+            g.reserved.push({ day: dayLabel(r.day), meal: r.mealTitle, amount: r.amount });
+          groups.set(k, g);
+        }
+        return [...groups.values()]
+          .filter((g) => g.inFreezer > 0 || g.reserved.length)
+          .map((g) => {
+            const reserved = g.reserved.reduce((a, r) => a + r.amount, 0);
+            return { name: g.name, ...(g.unit ? { unit: g.unit } : {}), inFreezer: +g.inFreezer.toFixed(3), free: Math.max(0, +(g.inFreezer - reserved).toFixed(3)), ...(g.reserved.length ? { reservedFor: g.reserved } : {}) };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, "nl"));
+      };
+      const shortages = (s: FreezerStock, kind: string) =>
+        s.demands.flatMap((d) =>
+          mealStockStatus(s.entries, s.reservations, d.mealId, d.lines)
+            .filter((x) => x.short > 1e-9 && hit(x.name))
+            .map((x) => ({ kind, day: dayLabel(d.day), item: x.name, wanted: x.wanted, reserved: x.reserved, short: x.short })),
+        );
+      const potjesList = [...potjes.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
+      const total = (w: string) => potjesList.reduce((a, p) => a + p.inFreezer[w], 0);
       return {
-        vleesjes: vleesjes.map((v: any) => ({ name: v.name, count: v.count, unit: v.unit, reservedBy: reservedFor(v.id) })),
-        groenten: groenten.map((g: any) => ({ name: g.name, amount: g.amount ?? g.count, unit: g.unit, reservedBy: reservedFor(g.id) })),
-        potjes: Object.entries(potjes).map(([name, v]) => ({ name, ...v })),
+        today: dayLabel(today),
+        potjes: {
+          totaalInDiepvries: { Robin: total("Robin"), Amber: total("Amber") },
+          perGerecht: potjesList.map((p) => ({ name: p.name, inFreezer: p.inFreezer, free: p.free, ...(p.plannedToEat.length ? { plannedToEat: p.plannedToEat } : {}) })),
+          nogTeKoken: coming,
+        },
+        vleesjes: stockView(vStock, () => ""),
+        groenten: stockView(gStock, (u) => u),
+        tekorten: [...shortages(vStock, "vleesje"), ...shortages(gStock, "groente")],
+        uitleg: "free = niet gereserveerd. Vleesjes en groenten verdwijnen pas uit de diepvries na de dag van de maaltijd; potjes zijn per persoon.",
       };
     },
   }),
 
   getShoppingList: tool({
-    description: "De boodschappenlijst: handmatig deel en het door de planning gegenereerde deel, als tekst.",
+    description:
+      "Het boodschappenlijstje: 'Zelf toegevoegd' (wat je zelf typte) en 'Uit je planning' (gemaakt uit gekozen dagen van de planning), plus per regel uit de planning van welke maaltijden en dagen het komt (voor 'waarom staat X op de lijst'). [x] = afgevinkt.",
     inputSchema: z.object({}),
     execute: async () => {
-      const { manual, generated } = await getShoppingDocs();
-      return { manual: docToText(manual) || null, fromPlanning: docToText(generated) || null };
+      const { manual, generated, generatedOrigins } = await getShoppingDocs();
+      return {
+        zelfToegevoegd: docToText(manual) || null,
+        uitJePlanning: docToText(generated) || null,
+        herkomst: (generatedOrigins?.lines ?? []).map((l) => ({
+          line: l.label,
+          from: l.origins.map((o) => `${o.meal} (${dayLabel(o.date)}${o.assignee && o.assignee !== "both" ? `, ${WHO[o.assignee] ?? o.assignee}` : ""}): ${o.amount}`),
+        })),
+      };
+    },
+  }),
+
+  getSettings: tool({
+    description:
+      "Lijsten die je in de app zelf beheert: recept-tags, de situaties per persoon (Amber/Robin, bv. 'tot 18u', 'Thuiswerk'; zonder keuze 'Thuis'), de winkelsecties van het boodschappenlijstje en wie er in het huishouden is.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const [tags, modes, cats, hh] = await Promise.all([
+        from("recipe_tags").select("label, sort").order("sort"),
+        from("plan_modes").select("who, label, sort").order("sort"),
+        from("ingredient_categories").select("name, sort").order("sort"),
+        from("household").select("name, diners").limit(1).maybeSingle(),
+      ]);
+      const ms = (modes.data ?? []) as any[];
+      return {
+        household: hh.data?.name ?? "Robin & Amber",
+        people: ((hh.data?.diners as any[]) ?? []).map((d) => d.label),
+        tags: (tags.data ?? []).map((t: any) => t.label),
+        situaties: {
+          Amber: ["Thuis (standaard)", ...ms.filter((m) => m.who === "amber").map((m) => m.label)],
+          Robin: ["Thuis (standaard)", ...ms.filter((m) => m.who === "robin").map((m) => m.label)],
+        },
+        winkelsecties: (cats.data ?? []).map((c: any) => c.name),
+      };
     },
   }),
 };
-

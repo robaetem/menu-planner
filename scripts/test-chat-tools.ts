@@ -3,7 +3,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { derive, type Facts } from "../lib/change/status";
 import { safePath } from "../lib/chat/code-tools";
-import { docToText } from "../lib/chat/data-tools";
+import { CHAT_TABLES, dataTools, dayLabel, docToText, matchesAll, norm } from "../lib/chat/data-tools";
+import { APP_KNOWLEDGE } from "../lib/chat/app-knowledge";
+import { appGuideTools } from "../lib/chat/app-guide";
 
 let failed = 0;
 function check(name: string, ok: boolean, extra?: unknown) {
@@ -23,6 +25,55 @@ for (const file of walk("lib/chat")) {
   const src = readFileSync(file, "utf8");
   for (const re of FORBIDDEN) check(`${file} has no ${re}`, !re.test(src));
 }
+
+// 1b. Only select on allow-listed tables: every from("x") in lib/chat names a CHAT_TABLES entry.
+const ALLOWED_TABLES = new Set<string>(CHAT_TABLES);
+check("CHAT_TABLES has no write-only or change table", !ALLOWED_TABLES.has("change_runs"));
+for (const file of walk("lib/chat")) {
+  const src = readFileSync(file, "utf8");
+  for (const m of src.matchAll(/\bfrom\(\s*["'`]([\w-]+)["'`]/g)) check(`${file} reads allow-listed table ${m[1]}`, ALLOWED_TABLES.has(m[1]));
+  // The one typed wrapper `getDb().from(t)` (t: ChatTable) is the only non-literal table.
+  const rest = src.replace(/\b(Buffer|Array)\.from\(/g, "").replace("getDb().from(t)", "");
+  check(`${file} has no .from( with a non-literal table`, !/\.from\(\s*[^"'`\s)]/.test(rest));
+}
+
+// 1c. Imports from outside lib/chat: only allow-listed read-only helpers (never
+// settleFreezer, syncMealStock, server actions, dispatchWorkflow, ...).
+const ALLOWED_IMPORTS: Record<string, string[]> = {
+  "@/lib/supabase/server": ["getDb", "DEV_BYPASS"],
+  "@/lib/date": ["addIsoDays", "todayIso"],
+  "@/lib/data": ["getShoppingDocs", "listPortions", "listRecipes", "getRecipe", "listVleesjes", "listGroenten", "listTags", "listModes", "listCategories", "getHousehold"],
+  "@/lib/freezer/stock-server": ["loadStock"],
+  "@/lib/freezer/stock": ["mealStockStatus", "type FreezerStock", "FreezerStock"],
+  "@/lib/freezer/potjes": ["readyOn"],
+  "@/app/(protected)/planning/config": ["resolveTitle"],
+  "@/lib/types": ["*"],
+  "@/lib/change/github": ["gh"],
+  "@/lib/change/runs": ["startChange"],
+  "@clerk/nextjs/server": ["currentUser"],
+};
+const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale"]);
+for (const file of walk("lib/chat")) {
+  const src = readFileSync(file, "utf8");
+  for (const m of src.matchAll(/import\s+(type\s+)?(?:\{([^}]*)\}|(\w+))\s+from\s+["']([^"']+)["']/g)) {
+    const mod = m[4];
+    if (mod.startsWith("./") || PACKAGES.has(mod)) continue;
+    const allowed = ALLOWED_IMPORTS[mod];
+    if (!allowed) {
+      check(`${file} imports only allow-listed modules (${mod})`, false, mod);
+      continue;
+    }
+    if (allowed.includes("*") || m[1]) continue;
+    const names = (m[2] ?? m[3] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    for (const n of names) check(`${file} import ${n} from ${mod} is allow-listed`, allowed.includes(n), n);
+  }
+}
+
+// 1d. Every chat tool is known: read-only data/guide/code tools plus request_change.
+const READ_TOOLS = ["getPlanning", "findMeals", "listRecipes", "getRecipe", "getFreezer", "getShoppingList", "getSettings", "appGuide", "listFiles", "readFile"];
+check("data tools are all known read tools", Object.keys(dataTools).every((k) => READ_TOOLS.includes(k)), Object.keys(dataTools));
+const toolsSrc = readFileSync("lib/chat/tools.ts", "utf8");
+check("request_change contract {request} -> {runId}", /request:\s*z\.string\(\)/.test(toolsSrc) && /\{\s*runId:\s*r\.runId\s*\}/.test(toolsSrc));
 
 // 2. path guard
 check("safePath ok", safePath("lib/data.ts") === "lib/data.ts");
@@ -53,4 +104,21 @@ check("closed unmerged", s({ pr: pr({ state: "closed" }) }).status === "failed")
 // 4. shopping doc flatten
 check("docToText", docToText({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "melk" }] }] }) === "melk");
 
-process.exit(failed ? 1 : 0);
+check("docToText task item", docToText({ type: "doc", content: [{ type: "taskList", content: [{ type: "taskItem", attrs: { checked: true }, content: [{ type: "paragraph", content: [{ type: "text", text: "melk" }] }] }] }] }) === "[x] melk");
+
+// 5. matching helpers
+check("norm folds quotes and accents", norm("Z’n Grieks Crème") === "z'n grieks creme");
+check("matchesAll every word", matchesAll("Pittige risotto met prei en scampi's", "risotto scampi") && !matchesAll("Prei", "risotto prei"));
+check("matchesAll plural", matchesAll("Hamburger", "hamburgers"));
+check("dayLabel has weekday", /^za 7 nov/.test(dayLabel("2026-11-07")), dayLabel("2026-11-07"));
+
+// 6. app guide
+check("app knowledge has topics", APP_KNOWLEDGE.length >= 12 && APP_KNOWLEDGE.every((k) => k.topic && k.title && k.text.length > 80));
+check("app knowledge is unique", new Set(APP_KNOWLEDGE.map((k) => k.topic)).size === APP_KNOWLEDGE.length);
+(async () => {
+  const g: any = await (appGuideTools.appGuide as any).execute({ topics: ["boodschappenlijst"] }, {});
+  check("appGuide picks a topic", g.topics.length >= 1 && g.topics.length < APP_KNOWLEDGE.length && /Zelf toegevoegd/.test(g.topics[0].text));
+  const all: any = await (appGuideTools.appGuide as any).execute({}, {});
+  check("appGuide without topic gives all", all.topics.length === APP_KNOWLEDGE.length);
+  process.exit(failed ? 1 : 0);
+})();
