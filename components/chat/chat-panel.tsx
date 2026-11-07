@@ -165,7 +165,7 @@ export function ChatPanel({
                           m.role === "user" ? (
                             <MessageContent
                               key={i}
-                              className="rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm text-primary-foreground"
+                              className="rounded-2xl rounded-br-md bg-[#F7F7F7] px-3.5 py-2 text-sm text-neutral-900"
                             >
                               {part.text}
                             </MessageContent>
@@ -173,7 +173,7 @@ export function ChatPanel({
                             <MessageContent
                               key={i}
                               markdown
-                              className="bg-transparent p-0 text-sm"
+                              className="max-w-none rounded-none bg-transparent p-0 text-sm"
                             >
                               {part.text}
                             </MessageContent>
