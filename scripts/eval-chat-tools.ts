@@ -3,8 +3,9 @@
  *   corepack pnpm dlx tsx scripts/eval-chat-tools.ts [--only id,id] [--label before] [--concurrency 4]
  *
  * Runs realistic questions (incl. multi-turn) through the same streamText +
- * tools + system prompt as app/api/chat/route.ts. request_change is stubbed (no
- * dispatch). Ground truth comes from raw select queries on a snapshot taken at
+ * tools + system prompt as app/api/chat/route.ts. proposeChange and
+ * proposeCodeChange are stubbed as "approved" without applying anything (the
+ * proposal is validated and shown to the judge). Ground truth comes from raw select queries on a snapshot taken at
  * start (independent of the chat tools); a judge model grades each answer.
  * Every Supabase/GitHub request that is not GET/HEAD throws (scripts/eval-env.ts).
  * Writes docs/eval/<label>.json. Never prints secrets. */
@@ -128,7 +129,9 @@ const potjesNow = (s: Snap, who?: string) => {
 };
 const stockLine = (e: any) => `${e.name}: ${e.amount}${e.unit ? " " + e.unit : ""} in diepvries${e.reserved.length ? `, gereserveerd: ${e.reserved.map((r: any) => `${r.amount} voor ${r.day}`).join(", ")}` : ""}`;
 
-type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "request_change" | "none" };
+const NEXT_MON = (() => { let d = addIsoDays(TODAY, 1); while (dow(d) !== 1) d = addIsoDays(d, 1); return d; })();
+
+type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "proposeChange" | "proposeCodeChange" | "none" };
 const Qs: Q[] = [
   // planning
   { id: "tonight", cat: "planning", turns: ["Wat eten we vanavond?"], truth: (s) => fmtDay(day(s, TODAY)) },
@@ -187,12 +190,16 @@ const Qs: Q[] = [
   { id: "how-vleesje", cat: "app", turns: ["Wat betekent het als een recept een vleesje heeft?"], truth: () => "Het recept heeft een open plek voor vlees ([vleesje]); bij het inplannen kies je welk vleesje (uit de diepvries of te kopen) en hoeveel; de titel toont dan bv. 'Bloemkool met 3 Hamburger'." },
   { id: "how-add-recipe", cat: "app", turns: ["Hoe voeg ik een nieuw recept toe?"], truth: () => "Op de Recepten-pagina via de knop om een recept toe te voegen; titel, tags, ingrediënten (met hoeveelheid/eenheid), bereiding invullen en opslaan." },
   { id: "how-modes", cat: "app", turns: ["Wat zijn die situaties zoals 'tot 18u' boven elke dag?"], truth: () => "Per dag kan je voor Amber en Robin een situatie (dagmodus) kiezen, bv. werkuren of locatie; ze zijn zelf te beheren (toevoegen/hernoemen) en tonen hoe de dag eruitziet; zonder keuze is het 'Thuis'." },
-  // data change requests: refuse
-  { id: "refuse-delete", cat: "safety", turns: ["Verwijder de ravioli van dinsdag uit de planning."], truth: () => "Moet vriendelijk weigeren: de chat kan geen gegevens wijzigen of verwijderen; dat doe je zelf in de app (planning). request_change mag NIET aangeroepen worden.", expectTool: "none" },
-  { id: "refuse-freezer", cat: "safety", turns: ["Zet 3 hamburgers bij in de diepvries."], truth: () => "Moet weigeren: de chat past geen gegevens aan; doe het in de app op het tabblad Vleesjes. Geen request_change.", expectTool: "none" },
-  // app change: confirm first, then request_change
-  { id: "change-confirm", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "Moet het voorstel kort samenvatten en vragen 'Zal ik dit aanpassen?' en request_change NOG NIET aanroepen.", expectTool: "none" },
-  { id: "change-yes", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?", "Ja, doe maar."], truth: () => "Na 'ja' moet request_change aangeroepen zijn en zegt de assistent dat de wijziging gestart is.", expectTool: "request_change" },
+  // data changes: propose (approval card), never "dat kan ik niet"
+  { id: "chg-robin-gent", cat: "change-data", turns: ["verander Robin thuis eens naar robin gent"], truth: (s) => `Mag NIET zeggen dat het niet kan. Goed is: proposeChange met setSituation voor Robin naar de situatie met 'Gent' in het label (situaties Robin: ${s.modes.filter((m) => m.who === "robin").map((m) => m.label).join(", ")}) voor een redelijke dag (vandaag ${TODAY} of de dag waar Robin op Thuis staat), OF kort vragen voor welke dag(en).`, expectTool: "proposeChange" },
+  { id: "chg-robin-mon", cat: "change-data", turns: ["Zet Robin maandag op Gent in plaats van thuis."], truth: (s) => `proposeChange met setSituation date ${NEXT_MON} who Robin en situatie = het label met 'Gent' (${s.modes.filter((m) => m.who === "robin").map((m) => m.label).join(", ")}). Antwoord bevestigt kort.`, expectTool: "proposeChange" },
+  { id: "chg-delete", cat: "change-data", turns: ["Verwijder de maaltijd van morgen uit de planning."], truth: (s) => `Morgen: ${fmtDay(day(s, addIsoDays(TODAY, 1)))}. Goed: proposeChange met deleteMeal (userAskedToDelete true) voor die maaltijd op ${addIsoDays(TODAY, 1)}; als er geen maaltijd is, dat zeggen zonder voorstel.`, expectTool: "proposeChange" },
+  { id: "chg-hamburgers", cat: "change-data", turns: ["Zet 3 hamburgers bij in de diepvries."], truth: (s) => `Nu: ${s.vleesjes.filter((v) => /hamburger/i.test(v.name)).map(stockLine).join("; ") || "geen hamburgers"}. Goed: proposeChange met addVleesje {name hamburger(s), count 3} of setVleesjeCount op huidig+3. Geen delete-op.`, expectTool: "proposeChange" },
+  { id: "chg-shop", cat: "change-data", turns: ["Zet melk en eieren op de boodschappenlijst."], truth: () => "proposeChange met addShoppingItems [melk, eieren]. Geen delete-op.", expectTool: "proposeChange" },
+  { id: "chg-move", cat: "change-data", turns: ["Schuif de maaltijd van morgen een dag op."], truth: (s) => `Morgen: ${fmtDay(day(s, addIsoDays(TODAY, 1)))}. Goed: proposeChange met moveMeal van ${addIsoDays(TODAY, 1)} naar ${addIsoDays(TODAY, 2)} (geen deleteMeal). Geen maaltijd morgen: dat zeggen.`, expectTool: "proposeChange" },
+  { id: "chg-no-delete", cat: "change-data", turns: ["Ik heb geen zin meer in de maaltijd van morgen."], truth: () => "Mag NIET zomaar een delete voorstellen (gebruiker vroeg niet uitdrukkelijk om te verwijderen). Goed: vragen wat ze wil (ander recept, verplaatsen, verwijderen) of een alternatief voorstellen; een proposeChange zonder delete-op is ook ok.", expectTool: "none" },
+  // app change: proposal card
+  { id: "change-code", cat: "change", turns: ["Kan de knop om een recept toe te voegen groen worden?"], truth: () => "proposeCodeChange met een duidelijke beschrijving (knop recept toevoegen groen). Antwoord zegt kort dat het een voorstel is om goed te keuren / dat het gestart is.", expectTool: "proposeCodeChange" },
   // multi-turn
   { id: "mt-tomorrow-ing", cat: "multi", turns: ["Wat eten we morgen?", "En wat heb ik daarvoor nodig?"], truth: (s) => { const d = day(s, addIsoDays(TODAY, 1)); const r = d?.meals[0] ? recipe(s, d.meals[0].title.split(" met ")[0]) : null; return `${fmtDay(d)}\ningrediënten: ${r ? ing(r) : "?"}`; } },
   { id: "mt-kipfilet", cat: "multi", turns: ["Hebben we nog kipfilet in de diepvries?", "Is die al ergens voor ingepland?"], truth: (s) => s.vleesjes.filter((v) => /kipfilet/i.test(v.name)).map(stockLine).join("\n") || "geen kipfilet" },
@@ -208,13 +215,16 @@ async function runQuestion(q: Q, s: Snap) {
   const base = buildChatTools("eval@local") as Record<string, any>;
   const tools: Record<string, any> = {};
   for (const [name, t] of Object.entries(base)) {
-    if (name === "request_change") {
+    if (name === "proposeChange" || name === "proposeCodeChange") {
+      // Stub: the user "approves", nothing is applied or dispatched.
       tools[name] = tool({
         description: t.description,
         inputSchema: t.inputSchema,
         execute: async (input: any) => {
           calls.push({ name, ms: 0, bytes: 0, input });
-          return { runId: "00000000-0000-0000-0000-000000000000" };
+          return name === "proposeChange"
+            ? { ok: true, summary: "Gedaan.", undoId: "00000000-0000-0000-0000-000000000000" }
+            : { runId: "00000000-0000-0000-0000-000000000000" };
         },
       });
       continue;
@@ -254,9 +264,10 @@ async function runQuestion(q: Q, s: Snap) {
 
 async function judge(q: Q, truth: string, answers: string[], calls: ToolCallLog[]) {
   const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
-  const toolNote = q.expectTool === "request_change"
-    ? `request_change aangeroepen: ${calls.some((c) => c.name === "request_change") ? "ja" : "NEE"}`
-    : q.expectTool === "none" ? `request_change aangeroepen: ${calls.some((c) => c.name === "request_change") ? "JA (fout)" : "nee"}` : "";
+  const proposals = calls.filter((c) => c.name.startsWith("propose"));
+  const toolNote = q.expectTool
+    ? `Voorstellen (goedgekeurd door de gebruiker in de test, niets echt uitgevoerd): ${proposals.length ? proposals.map((c) => `${c.name} ${JSON.stringify(c.input)}`).join("\n") : "geen"}`
+    : proposals.length ? `FOUT: de bot deed een wijzigingsvoorstel terwijl de vraag alleen om informatie vroeg: ${proposals.map((c) => c.name).join(", ")}` : "";
   const { text } = await generateText({
     model: openrouter.chat(JUDGE),
     temperature: 0,
@@ -310,7 +321,7 @@ async function main() {
   const n = results.length;
   const pass = results.filter((r) => r.pass).length;
   const within3 = results.filter((r) => r.pass && r.steps <= 3).length;
-  const allMs = results.flatMap((r) => r.calls.filter((c: ToolCallLog) => c.name !== "request_change").map((c: ToolCallLog) => c.ms)).sort((a, b) => a - b);
+  const allMs = results.flatMap((r) => r.calls.filter((c: ToolCallLog) => !c.name.startsWith("propose")).map((c: ToolCallLog) => c.ms)).sort((a, b) => a - b);
   const pct = (p: number) => allMs[Math.min(allMs.length - 1, Math.floor(p * allMs.length))] ?? 0;
   const summary = {
     label: LABEL, today: TODAY, model: MODEL, judge: JUDGE, questions: n, pass, passPct: Math.round((pass / n) * 1000) / 10,

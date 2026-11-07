@@ -1,4 +1,7 @@
-/* Chat safety + status derivation checks. Run: corepack pnpm dlx tsx scripts/test-chat-tools.ts */
+/* Chat safety + status derivation checks. Run: corepack pnpm dlx tsx scripts/test-chat-tools.ts
+ * With CHAT_TEST_LOCAL_DB=1 it also applies and undoes chat data changes on the
+ * LOCAL Supabase (pnpm db:start); it refuses to run against anything else. */
+import { LOCAL_DB } from "./chat-test-env";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { derive, type Facts } from "../lib/change/status";
@@ -6,6 +9,8 @@ import { safePath } from "../lib/chat/code-tools";
 import { CHAT_TABLES, dataTools, dayLabel, docToText, matchesAll, norm } from "../lib/chat/data-tools";
 import { APP_KNOWLEDGE } from "../lib/chat/app-knowledge";
 import { appGuideTools } from "../lib/chat/app-guide";
+import { DELETE_OPS, OpSchema, OpsSchema, ProposeChangeInput } from "../lib/chat/ops";
+import { buildChatTools } from "../lib/chat/tools";
 
 let failed = 0;
 function check(name: string, ok: boolean, extra?: unknown) {
@@ -50,6 +55,7 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   "@/lib/types": ["*"],
   "@/lib/change/github": ["gh"],
   "@/lib/change/runs": ["startChange"],
+  "./ops": ["*"],
   "@clerk/nextjs/server": ["currentUser"],
 };
 const PACKAGES = new Set(["ai", "zod", "date-fns", "date-fns/locale"]);
@@ -72,8 +78,23 @@ for (const file of walk("lib/chat")) {
 // 1d. Every chat tool is known: read-only data/guide/code tools plus request_change.
 const READ_TOOLS = ["getPlanning", "findMeals", "listRecipes", "getRecipe", "getFreezer", "getShoppingList", "getSettings", "appGuide", "listFiles", "readFile"];
 check("data tools are all known read tools", Object.keys(dataTools).every((k) => READ_TOOLS.includes(k)), Object.keys(dataTools));
-const toolsSrc = readFileSync("lib/chat/tools.ts", "utf8");
-check("request_change contract {request} -> {runId}", /request:\s*z\.string\(\)/.test(toolsSrc) && /\{\s*runId:\s*r\.runId\s*\}/.test(toolsSrc));
+// Changes are only proposed: the two propose tools have no execute (the client
+// shows an approval card), and no other tool exists besides the read tools.
+const all = buildChatTools("t@t") as Record<string, any>;
+check("only read + propose tools", Object.keys(all).every((k) => READ_TOOLS.includes(k) || k === "proposeChange" || k === "proposeCodeChange"), Object.keys(all));
+check("proposeChange has no execute", typeof all.proposeChange.execute === "undefined");
+check("proposeCodeChange has no execute", typeof all.proposeCodeChange.execute === "undefined");
+check("no request_change tool any more", !("request_change" in all));
+
+// Op schema: deletes only as delete* ops with userAskedToDelete: true.
+check("delete ops all start with delete/remove", [...DELETE_OPS].every((o) => /^(delete|remove)/.test(o)) && DELETE_OPS.size >= 8, [...DELETE_OPS]);
+check("non-delete ops have no delete flag", OpSchema.options.every((o) => /^(delete|remove)/.test(o.shape.op.value) === ("userAskedToDelete" in o.shape)));
+check("delete without flag is rejected", !OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x" }).success);
+check("delete with flag false is rejected", !OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x", userAskedToDelete: false }).success);
+check("delete with flag is accepted", OpSchema.safeParse({ op: "deleteMeal", date: "2027-01-01", meal: "x", userAskedToDelete: true }).success);
+check("unknown op is rejected", !OpSchema.safeParse({ op: "dropTable", table: "recipes" }).success);
+check("situation op ok", ProposeChangeInput.safeParse({ title: "Robin op zondag 22/11: Thuis → Gent", ops: [{ op: "setSituation", date: "2026-11-22", who: "Robin", situation: "Gent - Entourage" }] }).success);
+check("max ops", !OpsSchema.safeParse(Array.from({ length: 21 }, () => ({ op: "extendPlanning", days: 1 }))).success);
 
 // 2. path guard
 check("safePath ok", safePath("lib/data.ts") === "lib/data.ts");
@@ -120,5 +141,99 @@ check("app knowledge is unique", new Set(APP_KNOWLEDGE.map((k) => k.topic)).size
   check("appGuide picks a topic", g.topics.length >= 1 && g.topics.length < APP_KNOWLEDGE.length && /Zelf toegevoegd/.test(g.topics[0].text));
   const all: any = await (appGuideTools.appGuide as any).execute({}, {});
   check("appGuide without topic gives all", all.topics.length === APP_KNOWLEDGE.length);
+  if (LOCAL_DB) await dbTests();
+  else console.log("skip apply/undo DB tests (set CHAT_TEST_LOCAL_DB=1 with the local Supabase running)");
   process.exit(failed ? 1 : 0);
 })();
+
+// 7. apply + undo on the LOCAL database (chat-test-env refuses anything else).
+async function dbTests() {
+  const { getDb } = await import("../lib/supabase/server");
+  const { snapshot, stable } = await import("../app/api/chat/apply/journal");
+  const { settleFreezer } = await import("../lib/freezer/stock-server");
+  const apply = (await import("../app/api/chat/apply/route")).POST;
+  const undo = (await import("../app/api/chat/apply/[undoId]/undo/route")).POST;
+  const db = getDb();
+  const post = async (ops: unknown, title = "test") => (await apply(new Request("http://t/api/chat/apply", { method: "POST", body: JSON.stringify({ title, ops }) }))).json();
+  const undoReq = async (id: string) => {
+    const r = await undo(new Request("http://t/x", { method: "POST" }), { params: Promise.resolve({ undoId: id }) });
+    return { status: r.status, body: await r.json() };
+  };
+  const state = async () => stable(await snapshot(db));
+  await settleFreezer(db);
+  const D = (n: number) => `2031-01-${String(n).padStart(2, "0")}`; // far future: never real plans
+
+  const robinMode = (await db.from("plan_modes").select("label").eq("who", "robin").limit(1)).data?.[0]?.label;
+  const recipe = (await db.from("recipes").select("title").order("title").limit(1)).data?.[0]?.title;
+  check("local DB has a robin mode and a recipe", !!robinMode && !!recipe);
+
+  // a. situation (Robin's example) + undo restores exactly.
+  const s0 = await state();
+  const a = await post([{ op: "setSituation", date: D(10), who: "Robin", situation: robinMode }]);
+  const day = (await db.from("plan_days").select("robin_mode").eq("day_date", D(10)).maybeSingle()).data;
+  check("setSituation applied", a.ok === true && !!a.undoId && !!day?.robin_mode, a);
+  const ua = await undoReq(a.undoId);
+  check("undo setSituation", ua.status === 200 && ua.body.ok === true, ua);
+  check("undo restores the exact state (situation)", (await state()) === s0);
+  check("undo twice is refused", (await undoReq(a.undoId)).status === 409);
+
+  // b. many ops in one change, then undo everything.
+  const s1 = await state();
+  const b = await post([
+    { op: "createTag", label: "Chattest" },
+    { op: "createRecipe", title: "Chattest soep", tags: ["Chattest"], ingredients: [{ name: "Wortel", amount: 4, unit: "stuk" }, { name: "Room", perPerson: { Robin: 100, Amber: 50 }, unit: "ml" }], method: "Koken." },
+    { op: "addMeal", date: D(11), who: "Samen", recipe: "Chattest soep" },
+    { op: "setExtraPotjes", date: D(11), meal: "Chattest soep", robin: 1, amber: 2 },
+    { op: "setDayNote", date: D(11), note: "test notitie" },
+    { op: "addVleesje", name: "Chattest vlees", count: 3 },
+    { op: "addGroente", name: "Chattest erwten", amount: 500, unit: "gram" },
+    { op: "addPotjes", name: "Chattest potje", robin: 1, amber: 1 },
+    { op: "addShoppingItems", items: ["chattest melk", "chattest brood"] },
+    { op: "checkShoppingItems", items: ["chattest melk"], checked: true },
+  ]);
+  check("multi-op change applied", b.ok === true, b);
+  const r = (await db.from("recipes").select("id, tags, ingredients(name, amount, scaling, amounts_per_person)").eq("title", "Chattest soep").maybeSingle()).data as any;
+  check("recipe stored like the editor (Samen ÷ 2, per person)", r?.tags?.includes("chattest") && r.ingredients.some((i: any) => i.name === "Wortel" && Number(i.amount) === 2) && r.ingredients.some((i: any) => i.scaling === "per_person" && i.amounts_per_person.robin === 100), r);
+  const meal = (await db.from("plan_meals").select("freezer_robin, freezer_amber, day:plan_days!inner(day_date)").eq("day.day_date", D(11)).maybeSingle()).data as any;
+  check("meal planned with extra potjes", meal?.freezer_robin === 1 && meal?.freezer_amber === 2, meal);
+  const portions = (await db.from("freezer_portions").select("id").eq("name", "Chattest potje")).data ?? [];
+  check("potjes frozen", portions.length === 2);
+  const shop = JSON.stringify((await db.from("shopping_doc").select("content").order("id").limit(1).maybeSingle()).data?.content);
+  check("shopping items added and checked", shop.includes("chattest brood") && /"checked":true[^}]*}[^\]]*chattest melk|chattest melk/.test(shop));
+  const ub = await undoReq(b.undoId);
+  check("undo multi-op change", ub.body.ok === true, ub);
+  check("undo restores the exact state (multi-op)", (await state()) === s1);
+
+  // c. a failing op rolls the whole change back.
+  const s2 = await state();
+  const c = await post([{ op: "setDayNote", date: D(12), note: "blijft niet" }, { op: "addMeal", date: D(12), who: "Samen", recipe: "Dit recept bestaat niet 123" }]);
+  check("failing op -> ok:false with reason", c.ok === false && /niet gevonden/.test(c.error), c);
+  check("failing op changed nothing", (await state()) === s2);
+
+  // d. validation: delete without the flag, unknown op.
+  check("delete without flag refused", (await post([{ op: "deleteMeal", date: D(1), meal: "x" }])).ok === false);
+  check("unknown op refused", (await post([{ op: "sql", q: "drop table recipes" }])).ok === false);
+  check("validation changed nothing", (await state()) === s2);
+
+  // e. editing existing data, deleting, and undo.
+  const s3 = await state();
+  const e1 = await post([
+    { op: "addMeal", date: D(13), who: "Amber", recipe },
+    { op: "updateRecipe", recipe, addIngredients: [{ name: "Chattest peper", amount: 1, unit: "koffielepel" }], notes: "chattest notitie" },
+  ]);
+  check("edit existing recipe applied", e1.ok === true, e1);
+  const e2 = await post([{ op: "deleteMeal", date: D(13), meal: recipe, who: "Amber", userAskedToDelete: true }]);
+  check("delete meal applied", e2.ok === true, e2);
+  check("undo delete", (await undoReq(e2.undoId)).body.ok === true);
+  check("deleted meal is back", ((await db.from("plan_meals").select("id, day:plan_days!inner(day_date)").eq("day.day_date", D(13))).data ?? []).length === 1);
+  check("undo edit", (await undoReq(e1.undoId)).body.ok === true);
+  check("undo restores the exact state (edit + delete)", (await state()) === s3);
+
+  // f. undo refuses when the same rows were edited since (no lost work).
+  const f = await post([{ op: "setDayNote", date: D(14), note: "eerst" }]);
+  await db.from("plan_days").update({ note: "later met de hand" }).eq("day_date", D(14));
+  const uf = await undoReq(f.undoId);
+  check("undo conflict refused", uf.status === 409 && uf.body.ok === false, uf);
+  check("conflicting edit kept", (await db.from("plan_days").select("note").eq("day_date", D(14)).maybeSingle()).data?.note === "later met de hand");
+  await db.from("plan_days").delete().eq("day_date", D(14)); // test cleanup (local DB only)
+}
