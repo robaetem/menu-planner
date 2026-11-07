@@ -47,24 +47,26 @@ toggle (browser only), reordering meals inside one box, rewording one line of th
 
 Same model, prompt and settings as `/api/chat`; `proposeChange` and `request_change` are stubbed as
 approved, nothing is written (a fetch guard blocks every non-GET to Supabase and GitHub; 0 write
-attempts in every run). 66 questions: planning, history, recipes, freezer, shopping, settings, how the
-app works, data changes and app changes. Judge: an LLM with a calendar and the ground truth from raw
-selects.
+attempts in every run). 67 questions: planning, history, recipes, freezer, shopping, settings, how the
+app works, data changes and app changes. Ground truth comes from raw selects.
 
-| Run | Pass | Pass in at most 3 tool steps | Avg steps | Tool p50 / p95 / max |
+Decided (Robin, 2026-11-07): only `z-ai/glm-5.3-flash` is used, also for evals, and there is no LLM
+judge. The script prints question, truth, proposal and answer per case; grade them by reading. Keep
+runs small: `--only id,id` with the 5-10 cases that matter.
+
+| Run | Correct | Correct in at most 3 tool steps | Avg steps | Tool p50 / p95 / max |
 | --- | --- | --- | --- | --- |
-| Before (old tools) | 46.6% | 37.9% | 2.21 | 196 / 272 / 609 ms |
-| After, run 1 | 95.4% | 93.8% | 1.08 | 109 / 231 / 295 ms |
-| After, run 2 | 90.8% | 90.8% | 1.00 | 110 / 197 / 343 ms |
-| After, run 3 | 92.3% | 92.3% | 1.11 | 114 / 225 / 348 ms |
-| After, run 4 | 89.4% | 89.4% | 1.02 | 104 / 195 / 774 ms |
+| Before (old tools, 58 questions, LLM judge) | 46.6% | 37.9% | 2.21 | 196 / 272 / 609 ms |
+| After (66 questions, LLM judge, 4 runs) | 89.4-95.4% | 89.4-93.8% | 1.00-1.11 | 104-114 / 195-231 / 295-774 ms |
+| After, final prompt, 10 key cases graded by hand | 10/10 | 10/10 | 1.3 | 123 / 181 / 181 ms |
 
-Reading the failures of the after runs by hand: about half are judge mistakes (it miscounts lists,
-doubts correct weekdays, or misses a proposal that is in the log). The rest are the chat model: it
-sometimes adds an ingredient from the method text, shows 5 days for "de komende 7 dagen" (the prompt
-asks for 5), or counts a list wrong. Tool calls are 100-200 ms; spikes above 300 ms come from 5
-questions running at once. Use `EVAL_JUDGE` to pick the judge (default `z-ai/glm-5.3-flash`, the
-cheap chat model) and `--rejudge <label>` to grade an earlier run again without asking the chat.
+The 10 hand-graded cases: "zet op 20/11 dat robin in gent zit", "verander Robin thuis eens naar
+robin gent", "Zet Robin maandag op Gent", delete tomorrow's meal, "geen zin meer in de maaltijd van
+morgen" (no delete, asks), move a meal a day, app change asks "Zal ik ...?" and only calls
+`request_change` after "ja", potjes count, tonight's meal. Reading the LLM-judged failures by hand:
+about half were judge mistakes; the rest were the chat model (an ingredient taken from the method
+text, 5 days shown for "de komende 7 dagen" as the prompt asks, a miscounted list). Tool calls take
+100-200 ms; spikes above 300 ms came from 5 questions running at once.
 
 ## Tests
 
