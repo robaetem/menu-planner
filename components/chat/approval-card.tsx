@@ -3,11 +3,10 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 
-/** Single place to change: where an approved code change is dispatched. */
-export const CODE_CHANGE_ROUTE = "/api/change";
+// App-code changes go through the server tool request_change and ChangeRunCard, not through this card.
 export const APPLY_ROUTE = "/api/chat/apply";
 
-type ToolName = "proposeChange" | "proposeCodeChange";
+type ToolName = "proposeChange";
 
 export type AddToolResult = (args: {
   tool: string;
@@ -48,10 +47,7 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
     setBusy(true);
     setError(null);
     try {
-      const res =
-        tool === "proposeChange"
-          ? await post(APPLY_ROUTE, { ops: input?.ops ?? [] })
-          : await post(CODE_CHANGE_ROUTE, { request: input?.request ?? title });
+      const res = await post(APPLY_ROUTE, { ops: input?.ops ?? [] });
       await addToolResult({ tool, toolCallId, output: res });
     } catch {
       setError("Dat lukte niet. Probeer het straks opnieuw.");

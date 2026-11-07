@@ -29,6 +29,25 @@ const SUGGESTIONS = [
   "Maak de verzendknop rood",
 ];
 
+const CLIENT_TOOLS = new Set(["tool-proposeChange"]);
+
+/** True when the last assistant message ends on a client tool call that has an answer. */
+function needsClientContinue(messages: UIMessage[]) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return false;
+  return last.parts.some((p) => CLIENT_TOOLS.has(p.type));
+}
+
+/** A finished assistant answer (text or card) exists after the last user message: no error banner. */
+function lastHasAnswer(messages: UIMessage[]) {
+  const last = messages[messages.length - 1];
+  return (
+    !!last &&
+    last.role === "assistant" &&
+    last.parts.some((p) => (p.type === "text" && p.text.trim() !== "") || p.type.startsWith("tool-"))
+  );
+}
+
 const transport = new DefaultChatTransport({ api: "/api/chat" });
 
 function ToolPart({
@@ -46,7 +65,7 @@ function ToolPart({
     output?: { runId?: string; declined?: boolean; undoId?: string; error?: string };
     toolCallId: string;
   };
-  if (name === "proposeChange" || name === "proposeCodeChange") {
+  if (name === "proposeChange") {
     return (
       <ApprovalCard
         tool={name}
@@ -122,9 +141,15 @@ export function ChatPanel({
   closeIcon?: "x" | "chevron";
 }) {
   const storageKey = `menu-chat:${userId}`;
-  const { messages, sendMessage, setMessages, addToolResult, status, error } = useChat({
+  const { messages, sendMessage, setMessages, addToolResult, clearError, status, error } = useChat({
     transport,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    // Only continue after a client-side tool (proposeChange) got its answer. Server tools such as
+    // request_change already ran on the server; resending after them caused a bogus second request.
+    sendAutomaticallyWhen: (opts) =>
+      lastAssistantMessageIsCompleteWithToolCalls(opts) && needsClientContinue(opts.messages),
+    onFinish: ({ isError }) => {
+      if (!isError) clearError();
+    },
   });
   const [input, setInput] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
@@ -228,7 +253,7 @@ export function ChatPanel({
             {status === "submitted" && (
               <Loader variant="typing" size="sm" className="text-muted-foreground" />
             )}
-            {error && (
+            {status === "error" && error && !lastHasAnswer(messages) && (
               <p className="text-sm text-destructive">
                 Er ging iets mis. Probeer het opnieuw.
               </p>
