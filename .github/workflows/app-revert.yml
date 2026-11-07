@@ -1,0 +1,52 @@
+name: app-revert
+run-name: revert ${{ inputs.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Id van de aanvraag die teruggedraaid moet worden
+        type: string
+        required: true
+
+concurrency:
+  group: app-change
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  revert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUN_ID: ${{ inputs.run_id }}
+      GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+    steps:
+      - name: Validate input
+        run: |
+          [[ "$RUN_ID" =~ ^[A-Za-z0-9_-]{1,60}$ ]] || { echo "::error::bad run_id"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revert merged change
+        run: |
+          set -euo pipefail
+          SHA="$(gh pr list --head "change/$RUN_ID" --state merged --json mergeCommit --jq '.[0].mergeCommit.oid // empty')"
+          [ -n "$SHA" ] || { echo "::error::No merged PR found for branch change/$RUN_ID"; exit 1; }
+          git config user.name "menu-planner-bot"
+          git config user.email "menu-planner-bot@users.noreply.github.com"
+          git checkout -b "revert/$RUN_ID"
+          PARENTS="$(git rev-list --parents -n 1 "$SHA" | wc -w)"   # 2 = squash/normal commit, 3 = merge commit
+          if [ "$PARENTS" -ge 3 ]; then git revert --no-edit -m 1 "$SHA"; else git revert --no-edit "$SHA"; fi
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "revert/$RUN_ID"
+          printf 'Draait wijziging %s terug (commit %s).\n' "$RUN_ID" "$SHA" > /tmp/body.md
+          PR_URL="$(gh pr create --base main --head "revert/$RUN_ID" --title "Wijziging $RUN_ID terugdraaien" --body-file /tmp/body.md)"
+          gh pr merge "$PR_URL" --auto --squash
+          echo "Revert PR $PR_URL, auto-merge armed" | tee -a "$GITHUB_STEP_SUMMARY"
