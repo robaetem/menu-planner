@@ -22,7 +22,7 @@ import { addIsoDays, todayIso } from "@/lib/date";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 
 const MODEL = "z-ai/glm-5.3-flash";
-const JUDGE = process.env.EVAL_JUDGE ?? "anthropic/claude-sonnet-5.5";
+const JUDGE = process.env.EVAL_JUDGE ?? "z-ai/glm-5.3-flash";
 const args = process.argv.slice(2);
 const arg = (k: string) => {
   const i = args.indexOf(`--${k}`);
