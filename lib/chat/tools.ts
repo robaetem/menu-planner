@@ -1,18 +1,31 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { startChange } from "@/lib/change/runs";
+import { appGuideTools } from "./app-guide";
 import { codeTools } from "./code-tools";
 import { dataTools } from "./data-tools";
+import { ProposeChangeInput, ProposeChangeOutput } from "./ops";
 
-/** All chat tools. The only side effect anywhere is request_change, which
- *  queues an app-code change through lib/change (never touches household data). */
+/** All chat tools. Household data is only read here; changes to it are only
+ *  PROPOSED: proposeChange has no execute, so the AI SDK hands it to the
+ *  client, which shows a "Doen / Niet doen" card and, after Doen, calls
+ *  POST /api/chat/apply (journaled, undoable). The only side effect here is
+ *  request_change, which queues an app-code change through lib/change after
+ *  the user said yes in the conversation. */
 export function buildChatTools(email: string) {
   return {
     ...dataTools,
+    ...appGuideTools,
     ...codeTools,
+    proposeChange: tool({
+      description:
+        "Stel een wijziging aan GEGEVENS voor (planning, situaties, notities, maaltijden, recepten, tags, diepvries, boodschappenlijst). De gebruiker ziet een kaart met `title` en de knoppen Doen / Niet doen; pas na Doen gebeurt het. Schrijf er hooguit 'Zal ik dat doen?' bij. Gebruik namen zoals de lees-tools ze tonen (exacte receptnaam, situatielabel uit getSettings, datum yyyy-MM-dd). Meerdere stappen = meerdere ops in één voorstel. delete*/remove*/clear*-ops alleen als de gebruiker uitdrukkelijk vroeg om iets te verwijderen. Resultaat: { ok: true, summary } (gedaan; ongedaan maken kan in de kaart), { ok: false, error } (niets veranderd; leg uit waarom) of { declined: true } (niet doen; stel het niet opnieuw voor).",
+      inputSchema: ProposeChangeInput,
+      outputSchema: ProposeChangeOutput,
+    }),
     request_change: tool({
       description:
-        "Vraag een wijziging aan de APP (uiterlijk, gedrag, tekst) aan. Alleen aanroepen nadat de gebruiker in dit gesprek expliciet ja heeft gezegd op 'Zal ik dit aanpassen?'. NOOIT voor het wijzigen of verwijderen van gegevens (recepten, planning, diepvries, boodschappen).",
+        "Vraag een wijziging aan de APP (uiterlijk, gedrag, tekst) aan. Alleen aanroepen nadat de gebruiker in dit gesprek expliciet ja heeft gezegd op 'Zal ik dit aanpassen?'. NOOIT voor het wijzigen of verwijderen van gegevens (recepten, planning, diepvries, boodschappen): daarvoor is proposeChange.",
       inputSchema: z.object({
         request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands."),
       }),
