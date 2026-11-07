@@ -16,7 +16,10 @@ const PROTECTED: [RegExp, string][] = [
   [/^next\.config\.js$/, "next.config.js"],
   [/^scripts\//, "scripts/**"],
   [/^(CODING_AGENT\.md|AGENTS\.md|CLAUDE\.md|opencode\.json)$/, "agent rules/config"],
-  [/^(pnpm-workspace\.yaml|pnpm-lock\.yaml\.bak|vercel\.json)$/, "build/deploy config"],
+  [/^(pnpm-workspace\.yaml|pnpm-lock\.yaml\.bak|vercel\.json|\.npmrc|\.gitignore)$/, "build/deploy config"],
+  // The chat and change machinery itself, and the database/auth plumbing. (The chat screens in components/chat stay editable.)
+  [/^app\/api\//, "app/api/** (API routes)"],
+  [/^lib\/(change|chat|supabase)\//, "lib/change, lib/chat, lib/supabase"],
 ];
 
 const DANGEROUS: [RegExp, string][] = [
@@ -26,6 +29,9 @@ const DANGEROUS: [RegExp, string][] = [
   [/delete\s+from/i, "delete from"],
   [/\.upsert\(/, ".upsert("],
   [/\.update\(/, ".update("],
+  [/\.rpc\(/, ".rpc("],
+  [/process\.env\.(GITHUB|OPENROUTER|SUPABASE|CLERK)\w*/, "secret env var access"],
+  [/DEV_AUTH_BYPASS/, "DEV_AUTH_BYPASS"],
 ];
 
 export function check(files: FileDiff[]): string[] {
@@ -40,6 +46,9 @@ export function check(files: FileDiff[]): string[] {
       const addedKeys = new Set(f.added.filter(dep).map((l) => l.trim().split('"')[1]));
       const gone = f.removed.filter(dep).map((l) => l.trim().split('"')[1]).filter((k) => !addedKeys.has(k));
       if (gone.length) problems.push(`package.json removes entries: ${gone.join(", ")}`);
+      // Only dependency version lines may change: no scripts (postinstall etc.), no other fields.
+      const odd = f.added.filter((l) => l.trim() && !/^\s*"[^"]+":\s*"(\^|~|>=)?\d[^"\s]*",?\s*$/.test(l) && !/^\s*"[^"]+":\s*"latest",?\s*$/.test(l));
+      if (odd.length) problems.push(`package.json changes more than dependency versions: ${odd[0].trim().slice(0, 60)}`);
     }
     for (const line of f.added)
       for (const [re, name] of DANGEROUS)

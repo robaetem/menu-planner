@@ -32,6 +32,15 @@ t("drop table fails", d("lib/x.ts", ["'drop  table a'"]), true);
 t("dep removal fails", d("package.json", [], ['    "date-fns": "^4.4.0",']), true);
 t("dep add passes", d("package.json", ['    "zod": "^3.0.0",'], []), false);
 t("dep bump passes", d("package.json", ['    "date-fns": "^4.5.0",'], ['    "date-fns": "^4.4.0",']), false);
+t("api route fails", d("app/api/x/route.ts", ["export const a = 1;"]), true);
+t("lib/chat fails", d("lib/chat/tools.ts", ["//x"]), true);
+t("lib/change fails", d("lib/change/runs.ts", ["//x"]), true);
+t("lib/supabase fails", d("lib/supabase/server.ts", ["//x"]), true);
+t("chat screens stay editable", d("components/chat/chat-panel.tsx", ['className="bg-red-600"'], ['className="bg-blue-600"']), false);
+t(".rpc( fails", d("lib/x.ts", ['await db.rpc("x");']), true);
+t("secret env fails", d("components/x.tsx", ["const k = process.env.GITHUB_REPO_TOKEN;"]), true);
+t("package.json script fails", d("package.json", ['    "postinstall": "node x.js",']), true);
+t("package.json dep range with caret passes", d("package.json", ['    "zod": "^4.6.7",'], []), false);
 t("removed .delete( line passes", d("lib/x.ts", [], ['db.delete()']), false);
 t("deleted protected file fails", `diff --git a/proxy.ts b/proxy.ts\ndeleted file mode 100644\n--- a/proxy.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n`, true);
 
