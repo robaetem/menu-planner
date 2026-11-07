@@ -13,8 +13,42 @@ export type MarkdownProps = {
   components?: Partial<Components>
 }
 
+const BOLD_ONLY = /^\s*\*\*([^*]+?)\*\*:?\s*$/
+const BLOCK_LINE = /^\s*([-*+]|\d+[.)])\s|^\s*[|>#]|^\s*```/
+
+/** Models often use single newlines. Make bold-only lines headings and give a closing question or exclamation its own paragraph. */
+export function normalizeMarkdown(markdown: string): string {
+  const lines = markdown.split("\n")
+  const out: string[] = []
+  let fence = false
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) fence = !fence
+    if (fence) {
+      out.push(line)
+      continue
+    }
+    const prev = out.length ? out[out.length - 1] : ""
+    const bold = BOLD_ONLY.exec(line)
+    if (bold) {
+      if (prev.trim()) out.push("")
+      out.push(`#### ${bold[1].trim()}`, "")
+      continue
+    }
+    const closing =
+      /[?!]\s*$/.test(line) &&
+      prev.trim() &&
+      !/[?!:]\s*$/.test(prev) &&
+      !BLOCK_LINE.test(line) &&
+      !BLOCK_LINE.test(prev) &&
+      !/^#### /.test(prev)
+    if (closing) out.push("")
+    out.push(line)
+  }
+  return out.join("\n")
+}
+
 function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown)
+  const tokens = marked.lexer(normalizeMarkdown(markdown))
   return tokens.map((token) => token.raw)
 }
 
@@ -34,7 +68,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
       return (
         <span
           className={cn(
-            "bg-primary-foreground rounded-sm px-1 font-mono text-sm",
+            "bg-muted rounded-sm px-1 py-0.5 font-mono text-[0.85em]",
             className
           )}
           {...props}
@@ -55,6 +89,65 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   pre: function PreComponent({ children }) {
     return <>{children}</>
   },
+  p: ({ node: _n, className, ...props }) => (
+    <p className={cn("leading-relaxed", className)} {...props} />
+  ),
+  h1: ({ node: _n, className, ...props }) => (
+    <h1 className={cn("mt-1 text-base font-semibold tracking-tight", className)} {...props} />
+  ),
+  h2: ({ node: _n, className, ...props }) => (
+    <h2 className={cn("mt-1 text-sm font-semibold tracking-tight", className)} {...props} />
+  ),
+  h3: ({ node: _n, className, ...props }) => (
+    <h3 className={cn("mt-1 text-sm font-semibold", className)} {...props} />
+  ),
+  h4: ({ node: _n, className, ...props }) => (
+    <h4 className={cn("-mb-1.5 mt-2 text-sm font-semibold", className)} {...props} />
+  ),
+  ul: ({ node: _n, className, ...props }) => (
+    <ul className={cn("list-disc space-y-1 pl-5 marker:text-muted-foreground", className)} {...props} />
+  ),
+  ol: ({ node: _n, className, ...props }) => (
+    <ol className={cn("list-decimal space-y-1 pl-5 marker:text-muted-foreground", className)} {...props} />
+  ),
+  a: ({ node: _n, className, ...props }) => (
+    <a
+      className={cn("underline underline-offset-2", className)}
+      target="_blank"
+      rel="noreferrer noopener"
+      {...props}
+    />
+  ),
+  img: ({ node: _n, className, alt, ...props }) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img alt={alt ?? ""} className={cn("h-auto max-w-full rounded-lg", className)} {...props} />
+  ),
+  blockquote: ({ node: _n, className, ...props }) => (
+    <blockquote
+      className={cn("border-l-2 border-border pl-3 text-muted-foreground", className)}
+      {...props}
+    />
+  ),
+  hr: ({ node: _n, className, ...props }) => (
+    <hr className={cn("border-border", className)} {...props} />
+  ),
+  table: ({ node: _n, className, ...props }) => (
+    <div className="max-w-full overflow-x-auto rounded-lg border">
+      <table className={cn("w-full border-collapse text-left text-xs", className)} {...props} />
+    </div>
+  ),
+  thead: ({ node: _n, className, ...props }) => (
+    <thead className={cn("bg-muted/50 text-muted-foreground", className)} {...props} />
+  ),
+  tr: ({ node: _n, className, ...props }) => (
+    <tr className={cn("border-b last:border-b-0", className)} {...props} />
+  ),
+  th: ({ node: _n, className, ...props }) => (
+    <th className={cn("px-2 py-1.5 text-left font-medium whitespace-nowrap", className)} {...props} />
+  ),
+  td: ({ node: _n, className, ...props }) => (
+    <td className={cn("px-2 py-1.5 text-left align-top", className)} {...props} />
+  ),
 }
 
 const MemoizedMarkdownBlock = memo(
@@ -92,7 +185,7 @@ function MarkdownComponent({
   const blocks = useMemo(() => parseMarkdownIntoBlocks(children), [children])
 
   return (
-    <div className={className}>
+    <div className={cn("flex flex-col gap-3", className)}>
       {blocks.map((block, index) => (
         <MemoizedMarkdownBlock
           key={`${blockId}-block-${index}`}

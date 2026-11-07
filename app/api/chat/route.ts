@@ -1,15 +1,13 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import { requireHousehold } from "@/lib/chat/auth";
+import { chatModel, chatSettings } from "@/lib/chat/model";
 import { systemPrompt } from "@/lib/chat/system-prompt";
 import { buildChatTools } from "@/lib/chat/tools";
 import { todayIso } from "@/lib/date";
 
 export const maxDuration = 60;
 
-const MODEL = "z-ai/glm-5.3-flash";
 const MAX_MESSAGES = 40;
-const MAX_STEPS = 10;
 
 export async function POST(req: Request) {
   const a = await requireHousehold();
@@ -25,15 +23,12 @@ export async function POST(req: Request) {
     return Response.json({ error: "Ongeldig verzoek" }, { status: 400 });
   }
 
-  const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
   const result = streamText({
-    model: openrouter.chat(MODEL),
+    model: chatModel(process.env.OPENROUTER_API_KEY),
     system: systemPrompt(todayIso()),
     messages: await convertToModelMessages(messages),
     tools: buildChatTools(a.email),
-    stopWhen: stepCountIs(MAX_STEPS),
-    // The last step may not call tools, so the user always gets a written answer.
-    prepareStep: ({ stepNumber }) => (stepNumber >= MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}),
+    ...chatSettings,
   });
   return result.toUIMessageStreamResponse();
 }
