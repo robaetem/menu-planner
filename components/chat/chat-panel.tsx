@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useChat } from "@ai-sdk/react";
+import { Chat, useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai";
 import { ArrowUp, ChevronRight, ImagePlus, Sparkle, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -50,6 +50,49 @@ function lastHasAnswer(messages: UIMessage[]) {
     last.role === "assistant" &&
     last.parts.some((p) => (p.type === "text" && p.text.trim() !== "") || p.type.startsWith("tool-"))
   );
+}
+
+// The conversation lives outside the component: a remount (hot reload, closing the panel, a layout
+// change) must not swap the Chat while a card's apply is in flight, or the answer lands in an
+// instance nobody renders any more and the card stays on "Doen / Niet doen" (a second click applies twice).
+// Kept on globalThis so a hot reload of this very file (which re-runs the module) keeps it too.
+const store = globalThis as unknown as {
+  __menuChats?: Map<string, Chat<UIMessage>>;
+  __menuRestores?: Map<string, Promise<void>>;
+};
+const chats = (store.__menuChats ??= new Map());
+function chatFor(key: string) {
+  let c = chats.get(key);
+  if (!c) {
+    c = new Chat<UIMessage>({
+      transport,
+      // Only continue after a client-side tool (proposeChange) got its answer. Server tools such as
+      // request_change already ran on the server; resending after them caused a bogus second request.
+      sendAutomaticallyWhen: (opts) =>
+        lastAssistantMessageIsCompleteWithToolCalls(opts) && needsClientContinue(opts.messages),
+      onFinish: ({ isError }) => {
+        if (!isError) c?.clearError();
+      },
+    });
+    chats.set(key, c);
+  }
+  return c;
+}
+const restores = (store.__menuRestores ??= new Map());
+function restoreOnce(key: string, chat: Chat<UIMessage>) {
+  let p = restores.get(key);
+  if (!p) {
+    p = (async () => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) chat.messages = await loadImages(JSON.parse(raw) as UIMessage[]);
+      } catch {
+        /* corrupt storage: start fresh */
+      }
+    })();
+    restores.set(key, p);
+  }
+  return p;
 }
 
 // Only the last user message keeps its photos on the wire; older ones become "[foto]".
@@ -200,35 +243,20 @@ export function ChatPanel({
   closeIcon?: "x" | "chevron";
 }) {
   const storageKey = `menu-chat:${userId}`;
-  const { messages, sendMessage, setMessages, addToolResult, clearError, status, error } = useChat({
-    transport,
-    // Only continue after a client-side tool (proposeChange) got its answer. Server tools such as
-    // request_change already ran on the server; resending after them caused a bogus second request.
-    sendAutomaticallyWhen: (opts) =>
-      lastAssistantMessageIsCompleteWithToolCalls(opts) && needsClientContinue(opts.messages),
-    onFinish: ({ isError }) => {
-      if (!isError) clearError();
-    },
-  });
+  const chat = chatFor(storageKey);
+  const { messages, sendMessage, setMessages, addToolResult, status, error } = useChat({ chat });
   const [input, setInput] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
 
-  // Restore once per user. In the live app a code change hot-reloads this file and re-runs effects;
-  // restoring again would overwrite the running conversation with an older saved copy.
-  const restoredFor = React.useRef<string | null>(null);
+  // Restore once per user, into the shared chat (see chatFor). Restoring again on a remount would
+  // overwrite the running conversation with an older saved copy.
   React.useEffect(() => {
-    if (restoredFor.current === storageKey) return;
-    restoredFor.current = storageKey;
-    void (async () => {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) setMessages(await loadImages(JSON.parse(raw) as UIMessage[]));
-      } catch {
-        /* corrupt storage: start fresh */
-      }
-      setLoaded(true);
-    })();
-  }, [storageKey, setMessages]);
+    let live = true;
+    void restoreOnce(storageKey, chat).then(() => live && setLoaded(true));
+    return () => {
+      live = false;
+    };
+  }, [storageKey, chat]);
 
   React.useEffect(() => {
     if (!loaded || status === "streaming" || status === "submitted") return;
