@@ -1,5 +1,6 @@
 import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import { imageError, latestImages, stripOldImages } from "@/lib/chat/images";
+import { runStatuses } from "@/lib/change/runs";
 import { requireHousehold } from "@/lib/chat/auth";
 import { chatModel, chatSettings } from "@/lib/chat/model";
 import { systemPrompt } from "@/lib/chat/system-prompt";
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
   if (bad) return Response.json({ error: bad }, { status: 400 });
   const images = latestImages(messages);
   messages = stripOldImages(messages);
+  messages = await withChangeStatus(messages);
 
   const result = streamText({
     model: chatModel(process.env.OPENROUTER_API_KEY),
@@ -38,4 +40,24 @@ export async function POST(req: Request) {
     ...chatSettings,
   });
   return result.toUIMessageStreamResponse();
+}
+
+type Part = { type: string; output?: { runId?: string; status?: string } };
+
+/** Earlier request_change results carry only a runId; add what became of each run
+ *  (live, undone, failed...) so the model never treats an undone change as pending. */
+async function withChangeStatus(messages: UIMessage[]): Promise<UIMessage[]> {
+  const ids = messages.flatMap((m) =>
+    (m.parts as Part[]).filter((p) => p.type === "tool-request_change" && p.output?.runId).map((p) => p.output!.runId!),
+  );
+  const status = await runStatuses(ids).catch(() => new Map<string, string>());
+  if (!status.size) return messages;
+  return messages.map((m) => ({
+    ...m,
+    parts: (m.parts as Part[]).map((p) =>
+      p.type === "tool-request_change" && p.output?.runId && status.has(p.output.runId)
+        ? { ...p, output: { ...p.output, status: status.get(p.output.runId) } }
+        : p,
+    ) as UIMessage["parts"],
+  }));
 }

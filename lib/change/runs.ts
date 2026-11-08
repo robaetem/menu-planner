@@ -158,3 +158,10 @@ export async function startUndo(row: ChangeRun): Promise<StartResult> {
   }
   return { ok: true, runId: row.id };
 }
+
+/** Current status per run id (for telling the chat model what became of earlier requests). */
+export async function runStatuses(ids: string[]): Promise<Map<string, RunStatus>> {
+  if (!ids.length) return new Map();
+  const { data } = await getDb().from("change_runs").select("id, status").in("id", ids.slice(0, 50));
+  return new Map(((data ?? []) as { id: string; status: RunStatus }[]).map((r) => [r.id, r.status]));
+}
