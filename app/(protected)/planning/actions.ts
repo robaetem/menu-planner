@@ -15,8 +15,10 @@ import {
   type Who,
 } from "@/lib/freezer/potjes";
 import { assertCookBefore, syncCookedPortions } from "@/lib/freezer/server";
+import { formatGroenteQuantity, normalizeGroenteUnit } from "@/lib/freezer/inventory";
 import { syncMealBuyLines, type BuyLineMeal } from "@/lib/shopping/sync-buy-lines";
-import { demandLines, rebalanceStock, syncMealStock } from "@/lib/freezer/stock-server";
+import { demandLines, loadStock, rebalanceStock, settleFreezer, syncMealStock } from "@/lib/freezer/stock-server";
+import { pickFromStock, round3, stockKey } from "@/lib/freezer/stock";
 import type { Assignee, TemplateGroente, TemplateVleesje } from "@/lib/types";
 
 /** Get the plan_day row id for a date, creating it if needed. */
@@ -135,6 +137,70 @@ export async function assignRecipe(dayDate: string, assignee: Assignee, recipeId
   });
   if (error) throw error;
   revalidatePath("/planning");
+}
+
+/** "Groente diepvries" — plan a meal straight from a freezer vegetable, the
+ *  way "Potje diepvries" plans from the potjes tab. Takes one picker-step
+ *  (oldest entry first) that leaves the freezer on the meal's day; the meal
+ *  stays an ordinary meal, so the groente stays adjustable afterwards. */
+export async function planGroente(
+  dayDate: string,
+  assignee: Assignee,
+  name: string,
+  unit: string,
+  amount: number,
+): Promise<void> {
+  const groenteName = (name || "").trim();
+  const groenteUnit = (unit || "").trim();
+  const want = Math.max(0, Math.round((Number(amount) || 0) * 1000) / 1000);
+  if (!groenteName || want <= 0) throw new Error("Kies een groente uit de diepvries.");
+
+  // Refuse before anything is written when the freezer can't cover it.
+  const db = getDb();
+  await settleFreezer(db);
+  const stock = await loadStock(db, "groente");
+  const { picks, short } = pickFromStock(
+    stock.entries,
+    stock.reservations,
+    stockKey(groenteName, groenteUnit),
+    want,
+  );
+  const got = round3(picks.reduce((s, p) => s + p.amount, 0));
+  if (short > 0) {
+    throw new Error(
+      got > 0
+        ? `Er is nog maar ${formatGroenteQuantity(got, normalizeGroenteUnit(groenteUnit))} ${groenteName} vrij in de diepvries.`
+        : `Er is geen ${groenteName} meer vrij in de diepvries.`,
+    );
+  }
+
+  const dayId = await ensureDay(db, dayDate);
+  const d = dinersFor(assignee);
+  const groente: TemplateGroente = { name: groenteName, unit: groenteUnit, amount: want, replaces: null };
+  const { data: meal, error } = await db
+    .from("plan_meals")
+    .insert({
+      plan_day_id: dayId,
+      assignee,
+      from_freezer: false,
+      recipe_id: null,
+      freeform_title: groenteName,
+      raw_text: groenteName,
+      template_groenten: [groente],
+      diner_keys: d.diner_keys,
+      diner_count: d.diner_count,
+      sort: await nextSort(db, dayId),
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  const { error: reserveError } = await db
+    .from("freezer_reservations")
+    .insert(picks.map((p) => ({ meal_id: meal.id, groente_id: p.entryId, amount: p.amount })));
+  if (reserveError) throw reserveError;
+
+  revalidateStock();
 }
 
 export async function deleteMeal(mealId: string): Promise<void> {
