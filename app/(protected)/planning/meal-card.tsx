@@ -46,7 +46,7 @@ export function MealCard({
   const { drag, begin } = useMealDrag();
   const potje = meal.from_freezer;
   const baseTitle = meal.recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
-  const isTemplate = isVleesjeTemplate(meal.recipe) || canPickVleesje(meal);
+  const isTemplate = !potje && (isVleesjeTemplate(meal.recipe) || canPickVleesje(meal));
   const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
   const beingDragged = drag?.meal.id === meal.id;
   const { portions, today, vleesjes, groenten } = useFreezer();

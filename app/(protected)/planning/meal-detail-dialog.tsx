@@ -49,7 +49,8 @@ export function MealDetailDialog({
   const eats = portions.filter((p) => p.eatenByMealId === meal.id);
   const freezes = portions.filter((p) => p.sourceMealId === meal.id);
   const baseTitle = recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
-  const isTemplate = isVleesjeTemplate(recipe ?? { title: baseTitle }) || canPickVleesje(meal);
+  const isTemplate =
+    !meal.from_freezer && (isVleesjeTemplate(recipe ?? { title: baseTitle }) || canPickVleesje(meal));
   const title = isTemplate ? resolveTitle(baseTitle, meal.template_vleesjes) : baseTitle;
   const vleesjes = meal.template_vleesjes ?? [];
   const who = meal.assignee;
