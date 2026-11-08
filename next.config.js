@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The live devbox app runs `next dev`; no dev badge over the app's own buttons.
+  devIndicators: false,
   // Extra hosts allowed to load dev resources (HMR), e.g. a remote dev box: comma-separated.
   allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean),
   experimental: {
