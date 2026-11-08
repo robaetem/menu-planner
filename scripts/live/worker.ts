@@ -430,6 +430,15 @@ setInterval(async () => {
     restartApp("health check failed 3x");
   }
 }, 60_000);
+// next dev grows (about 4 GB after an hour of changes): restart it every night at 04:xx when idle,
+// then compile the pages again so the first morning visit is fast.
+let lastNightly = Date.now();
+setInterval(() => {
+  if (busy || new Date().getHours() !== 4 || Date.now() - lastNightly < 20 * 3600_000) return;
+  lastNightly = Date.now();
+  restartApp("nightly");
+  setTimeout(() => prewarm().then((ms) => log({ nightlyPrewarmMs: ms })), 15_000);
+}, 5 * 60_000);
 if (CONFIG.sync) setInterval(() => { if (!busy) enqueue(syncMain).catch((e) => log({ syncError: String(e) })); }, 60_000);
 
 // ---------- HTTP ----------
