@@ -11,6 +11,7 @@ import { APP_KNOWLEDGE } from "../lib/chat/app-knowledge";
 import { appGuideTools } from "../lib/chat/app-guide";
 import { DELETE_OPS, OpSchema, OpsSchema, ProposeChangeInput } from "../lib/chat/ops";
 import { buildChatTools } from "../lib/chat/tools";
+import { systemPrompt } from "../lib/chat/system-prompt";
 
 let failed = 0;
 function check(name: string, ok: boolean, extra?: unknown) {
@@ -163,6 +164,14 @@ check("norm folds quotes and accents", norm("Z’n Grieks Crème") === "z'n grie
 check("matchesAll every word", matchesAll("Pittige risotto met prei en scampi's", "risotto scampi") && !matchesAll("Prei", "risotto prei"));
 check("matchesAll plural", matchesAll("Hamburger", "hamburgers"));
 check("dayLabel has weekday", /^za 7 nov/.test(dayLabel("2026-11-07")), dayLabel("2026-11-07"));
+
+// 5b. system prompt rules (e2e 2026-11-08)
+{
+  const sp = systemPrompt("2026-11-08");
+  check("prompt: deze week = 7 days incl. vr/za, not 5", /komende 7 dagen/.test(sp) && !/eerste 5 dagen/.test(sp));
+  check("prompt: no self-correction", /nooit jezelf verbeteren/.test(sp));
+  check("prompt: quote freezer totals, tag ops", /aantalSoortenVrij/.test(sp) && /addTags/.test(sp));
+}
 
 // 6. app guide
 check("app knowledge has topics", APP_KNOWLEDGE.length >= 12 && APP_KNOWLEDGE.every((k) => k.topic && k.title && k.text.length > 80));
@@ -400,5 +409,32 @@ async function dbTests() {
     check("tags replaces the whole list", rep.ok === true && (await tagsOf()) === "chattest b", rep);
     for (const x of [rep, rem, add, fx]) await undoReq(x.undoId);
     check("undo restores the exact state (tags)", (await state()) === sI);
+  }
+
+  // j. getFreezer totals (e2e 2026-11-08: chat said 10 soorten vrij, the tab 9): explicit counts, same arithmetic as the tabs.
+  {
+    const { loadStock } = await import("../lib/freezer/stock-server");
+    const { entryStatus } = await import("../lib/freezer/stock");
+    const sJ = await state();
+    const fx = await post([
+      { op: "createRecipe", title: "Chattest vrij" },
+      { op: "addVleesje", name: "Chattest vrij a", count: 2 },
+      { op: "addVleesje", name: "Chattest vrij b", count: 3 },
+      { op: "addVleesje", name: "Chattest vrij c", count: 1 },
+      { op: "addGroente", name: "Chattest erwt", amount: 400, unit: "gram" },
+      { op: "addGroente", name: "Chattest bonen", amount: 2, unit: "stuk" },
+      { op: "addMeal", date: D(23), who: "Samen", recipe: "Chattest vrij" },
+      { op: "setMealVleesjes", date: D(23), meal: "Chattest vrij", vleesjes: [{ name: "Chattest vrij c", count: 1, source: "diepvries" }, { name: "Chattest vrij b", count: 1, source: "diepvries" }] },
+    ]);
+    check("totals fixture applied", fx.ok === true, fx);
+    const fz: any = await (dataTools.getFreezer as any).execute({ search: "chattest" }, {});
+    check("vleesjes: 2 soorten vrij, 4 stuks (a 2 + b 2)", fz.vleesjes.aantalSoortenVrij === 2 && fz.vleesjes.totaalVrij === 4, fz.vleesjes);
+    check("vrij lists only items with free > 0; fully planned apart", fz.vleesjes.vrij.map((v: any) => v.naam).join() === "Chattest vrij a,Chattest vrij b" && fz.vleesjes.volledigIngepland.map((v: any) => v.naam).join() === "Chattest vrij c", fz.vleesjes);
+    check("groenten: 2 soorten vrij, totaal per eenheid", fz.groenten.aantalSoortenVrij === 2 && fz.groenten.totaalVrij.gram === 400 && fz.groenten.totaalVrij.stuk === 2, fz.groenten);
+    const all: any = await (dataTools.getFreezer as any).execute({}, {});
+    const st = await loadStock(db, "vleesje");
+    const rows_ = st.entries.filter((e) => e.amount > 0).map((e) => ({ name: e.name.toLowerCase(), free: entryStatus(e, st.reservations).free }));
+    check("matches the Vleesjes tab (soorten and total free)", all.vleesjes.aantalSoortenVrij === new Set(rows_.filter((r) => r.free > 0).map((r) => r.name)).size && all.vleesjes.totaalVrij === rows_.reduce((a, r) => a + r.free, 0), { chat: [all.vleesjes.aantalSoortenVrij, all.vleesjes.totaalVrij], rows: rows_.length });
+    check("undo totals fixture", (await undoReq(fx.undoId)).body.ok === true && (await state()) === sJ);
   }
 }
