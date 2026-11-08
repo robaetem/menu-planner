@@ -415,7 +415,9 @@ function restartApp(why: string) {
   lastRestart = Date.now();
   log({ restartApp: why });
   // The app's run loop (scripts/live/app.sh) starts it again.
-  spawn("pkill", ["-f", `--port ${new URL(CONFIG.appUrl).port}`], { stdio: "ignore" });
+  const port = new URL(CONFIG.appUrl).port;
+  spawn("pkill", ["-f", "--", `next dev --turbopack -H 0.0.0.0 --port ${port}`], { stdio: "ignore" });
+  spawn("fuser", ["-k", `${port}/tcp`], { stdio: "ignore" }); // the next-server child holds the port
 }
 
 // ---------- watchdog + timers ----------
