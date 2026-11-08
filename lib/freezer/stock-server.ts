@@ -121,17 +121,32 @@ export async function syncMealStock(
   const stock = await loadStock(db, kind);
   const change = planMealReservations(stock.entries, stock.reservations, mealId, before, after, { strict: true });
   await applyChange(db, kind, change);
-  if (change.remove.length || change.update.length) await rebalanceStock(db, kind);
+  // The meal row still holds its old lines (the caller updates it afterwards):
+  // rebalance with the new lines, or a released line would be re-reserved at once.
+  if (change.remove.length || change.update.length) await rebalanceStock(db, kind, { mealId, lines: after });
 }
 
 /** After stock changed by hand or a meal let go: trim reservations that no
  *  longer fit their entry, then fill upcoming shortages, earliest day first. */
-export async function rebalanceStock(db: SupabaseClient, kind: StockKind): Promise<void> {
-  let stock = await loadStock(db, kind);
+export async function rebalanceStock(
+  db: SupabaseClient,
+  kind: StockKind,
+  /** One meal whose lines are being changed right now: use these instead of what its row still says. */
+  override?: { mealId: string; lines: StockLine[] },
+): Promise<void> {
+  const load = async () => {
+    const s = await loadStock(db, kind);
+    if (!override) return s;
+    const demands = s.demands.filter((d) => d.mealId !== override.mealId);
+    const old = s.demands.find((d) => d.mealId === override.mealId);
+    if (old && override.lines.length) demands.push({ ...old, lines: override.lines });
+    return { ...s, demands };
+  };
+  let stock = await load();
   const trim = planTrimOverbooked(stock.entries, stock.reservations);
   if (trim.remove.length || trim.update.length) {
     await applyChange(db, kind, trim);
-    stock = await loadStock(db, kind);
+    stock = await load();
   }
   const fill = planFillShortages(stock.entries, stock.reservations, stock.demands);
   if (fill.insert.length) await applyChange(db, kind, fill);
