@@ -15,7 +15,7 @@ import { formatDayShort } from "@/lib/date";
 import type { Portion, Who } from "@/lib/freezer/potjes";
 import { deleteMeal, setMealFreezer } from "./actions";
 import { useFreezer } from "./freezer-context";
-import { isVleesjeTemplate, vleesjeSummary } from "./config";
+import { canPickVleesje, isVleesjeTemplate, vleesjeSummary } from "./config";
 import { useMealDrag } from "./meal-drag";
 
 function dinerLabels(meal: PlanMealWithRecipe, diners: Diner[]): string[] {
@@ -46,7 +46,7 @@ export function MealCard({
   const { drag, begin } = useMealDrag();
   const potje = meal.from_freezer;
   const baseTitle = meal.recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
-  const isTemplate = isVleesjeTemplate(meal.recipe);
+  const isTemplate = isVleesjeTemplate(meal.recipe) || canPickVleesje(meal);
   const vleesjeChosen = vleesjeSummary(meal.template_vleesjes);
   const beingDragged = drag?.meal.id === meal.id;
   const { portions, today, vleesjes, groenten } = useFreezer();

@@ -12,7 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { serializePlannedIngredient } from "@/lib/planning/ingredient-quantity";
 import { freezerReplacedIngredients } from "@/lib/planning/shopping";
-import { assigneeLabel, isVleesjeTemplate, resolveTitle } from "./config";
+import { assigneeLabel, canPickVleesje, isVleesjeTemplate, resolveTitle } from "./config";
 import type { Diner, PlanMealWithRecipe, RecipeWithIngredients } from "@/lib/types";
 import { addIsoDays, formatDayShort, formatMonthDay } from "@/lib/date";
 import { isInFreezer, type Portion } from "@/lib/freezer/potjes";
@@ -49,7 +49,7 @@ export function MealDetailDialog({
   const eats = portions.filter((p) => p.eatenByMealId === meal.id);
   const freezes = portions.filter((p) => p.sourceMealId === meal.id);
   const baseTitle = recipe?.title ?? meal.freeform_title ?? meal.raw_text ?? "Maaltijd";
-  const isTemplate = isVleesjeTemplate(recipe ?? { title: baseTitle });
+  const isTemplate = isVleesjeTemplate(recipe ?? { title: baseTitle }) || canPickVleesje(meal);
   const title = isTemplate ? resolveTitle(baseTitle, meal.template_vleesjes) : baseTitle;
   const vleesjes = meal.template_vleesjes ?? [];
   const who = meal.assignee;
