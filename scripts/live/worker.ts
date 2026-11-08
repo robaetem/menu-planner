@@ -26,7 +26,7 @@ const CONFIG = {
   repo: env("GITHUB_REPO", "robaetem/menu-planner"),
   push: env("LIVE_PUSH", "1") === "1",
   sync: env("LIVE_SYNC", "1") === "1",
-  agentTimeoutMs: 150_000,
+  agentTimeoutMs: 90_000,
 };
 const RUN_AGENT = process.env.LIVE_AGENT_SCRIPT || join(__dirname, "run-agent.sh"); // override only in tests
 

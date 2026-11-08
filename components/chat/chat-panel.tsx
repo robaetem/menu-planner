@@ -175,7 +175,12 @@ export function ChatPanel({
   const [input, setInput] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
 
+  // Restore once per user. In the live app a code change hot-reloads this file and re-runs effects;
+  // restoring again would overwrite the running conversation with an older saved copy.
+  const restoredFor = React.useRef<string | null>(null);
   React.useEffect(() => {
+    if (restoredFor.current === storageKey) return;
+    restoredFor.current = storageKey;
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) setMessages(JSON.parse(raw) as UIMessage[]);
