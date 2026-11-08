@@ -11,7 +11,7 @@ import { shoppingDocPatch } from "../lib/shopping/document-sections";
 import { isPlainJson, toPlainJson } from "../lib/shopping/plain-json";
 import { editorUnit as mapEditorUnit, UNIT_OPTIONS } from "../lib/planning/units";
 import { dinersFor } from "../lib/planning/assignment";
-import { blockedPotjes, freezerTimeline, pickPortions, potjeChoices, type Portion } from "../lib/freezer/potjes";
+import { blockedPotjes, freezerTimeline, pickPortions, potjeBlockReason, potjeChoices, potjeFreeTotals, potjeOverview, type Portion } from "../lib/freezer/potjes";
 import {
   buildOriginIndex,
   containsWord,
@@ -580,6 +580,50 @@ eq("ranker: 'vriezer' -> Stoofvlees first", r3[0].title, "Stoofvlees");
   eq("images: latestImages", latestImages(msgs), ["data:image/jpeg;base64,BBBB"]);
   eq("images: rejects non-image url", imageError([{ id: "z", role: "user", parts: [{ type: "file", mediaType: "x", url: "https://e.com/a.jpg" }] }] as any) !== null, true);
   eq("images: accepts jpeg", imageError([msgs[2]]), null);
+}
+
+
+// Regression (chat 2026-11-08): free potjes per person, the prod freezer of that day.
+{
+  const T = "2026-11-08";
+  const P = (id: string, who: "robin" | "amber", name: string, x: Partial<Portion> = {}): Portion => ({
+    id, who, name, sourceMealId: null, cookOn: null, frozenOn: null, eatenByMealId: null, eatenOn: null, ...x,
+  });
+  const cooked = (on: string) => ({ sourceMealId: `cook-${on}`, cookOn: on });
+  const eaten = (on: string) => ({ eatenByMealId: `eat-${on}`, eatenOn: on });
+  const ps: Portion[] = [
+    P("h1", "robin", "Hamrolletjes met witloof", { ...cooked("2026-11-04"), ...eaten("2026-11-17") }),
+    P("h2", "amber", "Hamrolletjes met witloof", { ...cooked("2026-11-04"), ...eaten("2026-11-17") }),
+    P("h3", "amber", "Hamrolletjes met witloof", cooked("2026-11-04")),
+    P("q1", "robin", "Quiche met spinazie", { ...cooked("2026-10-25"), ...eaten("2026-11-09") }),
+    P("q2", "robin", "Quiche met spinazie", { frozenOn: "2026-11-07" }),
+    P("r1", "robin", "Ravioli", { ...cooked("2026-10-12"), ...eaten("2026-11-10") }),
+    P("r2", "amber", "Ravioli", { ...cooked("2026-10-12"), ...eaten("2026-11-10") }),
+    P("p1", "amber", "Pastinaakpuree", cooked("2026-11-08")),
+    P("c1", "robin", "Gevulde courgette", cooked("2026-11-14")),
+    P("c2", "amber", "Gevulde courgette", cooked("2026-11-14")),
+  ];
+  const ov = potjeOverview(ps, T);
+  const by = (n: string) => ov.find((o) => o.name === n)!;
+  eq("overview: hamrolletjes Amber 1 free, Robin 0", [by("Hamrolletjes met witloof").who.amber.free, by("Hamrolletjes met witloof").who.robin.free], [1, 0]);
+  eq("overview: hamrolletjes Amber 2 in freezer", by("Hamrolletjes met witloof").who.amber.inFreezer, 2);
+  eq("overview: ravioli fully planned", [by("Ravioli").who.robin.free, by("Ravioli").who.amber.free, by("Ravioli").who.robin.planned.length], [0, 0, 1]);
+  eq("overview: pastinaak free later for Amber", [by("Pastinaakpuree").who.amber.freeNow, by("Pastinaakpuree").who.amber.freeLater, by("Pastinaakpuree").who.amber.freeLaterOn], [0, 1, "2026-11-09"]);
+  eq("overview: courgette free for Samen", by("Gevulde courgette").freeSamen, 1);
+  eq("overview: totals", potjeFreeTotals(ov), { robin: 2, amber: 3, samen: 1 });
+  eq("overview: free now first", ov[0].who.robin.freeNow + ov[0].who.amber.freeNow > 0, true);
+  eq("overview: fully planned last", ov[ov.length - 1].name, "Ravioli");
+  // Every free portion is one the planning menu can hand out on some later day.
+  const later = "2026-11-21";
+  for (const w of ["robin", "amber"] as const) {
+    const menu = potjeChoices(ps, later, w, T).reduce((s, c) => s + c.count, 0);
+    eq(`overview matches planning menu (${w}, ${later})`, potjeFreeTotals(ov)[w], menu);
+  }
+  eq("overview matches planning menu (samen)", potjeFreeTotals(ov).samen, potjeChoices(ps, later, "both", T).reduce((s, c) => s + c.count, 0));
+  eq("reason: quiche for Samen", potjeBlockReason(ps, "Quiche met spinazie", later, "both", T), "Amber heeft geen potje “Quiche met spinazie”.");
+  eq("reason: quiche for Robin is fine", potjeBlockReason(ps, "Quiche met spinazie", later, "robin", T), null);
+  eq("reason: ravioli planned", potjeBlockReason(ps, "Ravioli", later, "amber", T), "Amber heeft maar één potje “Ravioli”, al ingepland op 2026-11-10.");
+  eq("reason: courgette too early", potjeBlockReason(ps, "Gevulde courgette", "2026-11-12", "both", T), "Robin kan “Gevulde courgette” pas eten vanaf 2026-11-15.");
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
