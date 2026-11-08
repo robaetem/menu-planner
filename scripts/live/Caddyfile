@@ -1,6 +1,11 @@
 {
 	admin off
 	auto_https off
+	servers {
+		# Tailscale Funnel connects from localhost and sets X-Forwarded-Proto https; keep it,
+		# or the app builds http:// sign-in redirects.
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
 }
 http://:3402 {
 	bind 127.0.0.1
