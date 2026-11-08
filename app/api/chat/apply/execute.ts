@@ -182,6 +182,9 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
         if (!choices.length) throw new Error(`Er is geen vrij potje voor ${op.who} op ${formatDayLabel(op.date)}.`);
         name = choices[0].name;
       } else {
+        // "hamrolletjes" for "Hamrolletjes met witloof": take the one free dish that contains it.
+        const part = choices.filter((c) => norm(c.name).includes(norm(name)));
+        if (!choices.some((c) => norm(c.name) === norm(name)) && part.length === 1) name = part[0].name;
         const reason = potjeBlockReason(portions, name, op.date, box === "both" ? "both" : (box as Who), today, undefined, formatDayLabel);
         if (reason) {
           const fits = choices.map((c) => c.name).slice(0, 5);
