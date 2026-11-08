@@ -337,4 +337,46 @@ async function dbTests() {
     check("undo potjes fixture", (await undoReq(fixture.undoId)).body.ok === true);
     check("undo restores the exact state (potjes)", (await state()) === sG);
   }
+
+  // h. setMealVleesjes (e2e 2026-11-08): replacing a line releases its reservation for good,
+  // "add" keeps existing lines, and the summary lists the full resulting list.
+  {
+    const sH = await state();
+    const fx = await post([
+      { op: "createRecipe", title: "Chattest bloemkool" },
+      { op: "addVleesje", name: "Chattest hamburger", count: 3 },
+      { op: "addVleesje", name: "Chattest krokante kip", count: 4 },
+      { op: "addMeal", date: D(22), who: "Samen", recipe: "Chattest bloemkool" },
+      { op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", mode: "replace", vleesjes: [{ name: "Chattest hamburger", count: 1, source: "diepvries" }, { name: "Chattest hamburger", count: 2, source: "kopen" }] },
+    ]);
+    check("vleesjes fixture applied", fx.ok === true, fx);
+    const held = async (name: string) => {
+      const v = (await db.from("vleesjes").select("id").eq("name", name)).data ?? [];
+      const r = (await db.from("freezer_reservations").select("amount").in("vleesje_id", v.map((x: any) => x.id)).is("settled_at", null)).data ?? [];
+      return r.reduce((a: number, x: any) => a + Number(x.amount), 0);
+    };
+    check("hamburger reserved 1", (await held("Chattest hamburger")) === 1);
+    const add = await post([{ op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", vleesjes: [{ name: "chattest krokante kip", count: 2, source: "diepvries" }] }]);
+    check("default mode adds to the existing lines", add.ok === true && (await held("Chattest hamburger")) === 1 && (await held("Chattest krokante kip")) === 2, add);
+    check("summary lists the full resulting list", /1 Chattest hamburger \(diepvries\), 2 Chattest hamburger \(kopen\), 2 Chattest krokante kip \(diepvries\)/.test(add.summary) && /Chattest bloemkool/.test(add.summary), add);
+    const rep = await post([{ op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", mode: "replace", vleesjes: [{ name: "Chattest krokante kip", count: 2, source: "diepvries" }] }]);
+    check("replace releases the removed line's reservation", rep.ok === true && (await held("Chattest hamburger")) === 0 && (await held("Chattest krokante kip")) === 2, { rep, h: await held("Chattest hamburger") });
+    const ur = await undoReq(rep.undoId);
+    check("undo replace", ur.body.ok === true);
+    check("undo add", (await undoReq(add.undoId)).body.ok === true);
+
+    // setMealGroenten: names from the freezer resolve to the real entry ("prei" -> "Chattest prei 1P", unit stuk).
+    const gx = await post([{ op: "addGroente", name: "Chattest prei 1P", amount: 1, unit: "stuk" }]);
+    check("groente fixture", gx.ok === true, gx);
+    const g1 = await post([{ op: "setMealGroenten", date: D(22), meal: "Chattest bloemkool", groenten: [{ name: "chattest prei", amount: 1, unit: "portie" }] }]);
+    check("groente resolves name and unit to the freezer entry", g1.ok === true && /Chattest prei 1P/.test(g1.summary), g1);
+    const gr = (await db.from("freezer_reservations").select("amount, groente:groenten(name, unit)").not("groente_id", "is", null).is("settled_at", null)).data as any[];
+    check("groente reserved on the real entry", gr.some((r) => r.groente?.name === "Chattest prei 1P" && Number(r.amount) === 1), gr);
+    const g2 = await post([{ op: "setMealGroenten", date: D(22), meal: "Chattest bloemkool", groenten: [{ name: "Chattest spruitjes", amount: 1, unit: "stuk" }] }]);
+    check("unknown groente gives a clear error with what exists", g2.ok === false && /Chattest prei 1P/.test(g2.error), g2);
+    check("undo groente fixture", (await undoReq(g1.undoId)).body.ok === true && (await undoReq(gx.undoId)).body.ok === true);
+
+    check("undo vleesjes fixture", (await undoReq(fx.undoId)).body.ok === true);
+    check("undo restores the exact state (vleesjes)", (await state()) === sH);
+  }
 }

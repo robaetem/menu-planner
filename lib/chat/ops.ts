@@ -35,7 +35,8 @@ export const OpSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("setMealVleesjes"),
     ...mealRef,
-    vleesjes: z.array(z.object({ name, count: z.number().int().min(1).max(99), source: z.enum(["diepvries", "kopen"]) })).max(10),
+    vleesjes: z.array(z.object({ name, count: z.number().int().min(1).max(99), source: z.enum(["diepvries", "kopen"]) })).max(10).describe("Naam uit getFreezer voor 'diepvries'"),
+    mode: z.enum(["add", "replace"]).optional().describe("'add' (standaard): komt erbij bij wat de maaltijd al heeft (zelfde vleesje en bron: aantal wordt opgeteld). 'replace' alleen als ze zegt vervang/wissel/in plaats van: dan blijft enkel deze lijst over"),
   }),
   z.object({
     op: z.literal("setMealGroenten"),
