@@ -22,6 +22,12 @@ export function isVleesjeTemplate(recipe: { has_vleesje?: boolean; title?: strin
   return !!recipe && (!!recipe.has_vleesje || hasVleesjeToken(recipe.title));
 }
 
+/** A meal planned straight from the freezer (a "Potje diepvries" or a freezer
+ *  vegetable) has no recipe but can still carry a vleesje from the freezer. */
+export function canPickVleesje(meal: { recipe_id?: string | null } | null | undefined): boolean {
+  return !!meal && !meal.recipe_id;
+}
+
 /** "2 hamburger + 1 worst" from the chosen template vleesjes. */
 export function vleesjeSummary(vleesjes: TemplateVleesje[] | null | undefined): string {
   return (vleesjes || []).map((v) => `${v.count} ${v.name}`).join(" + ");
