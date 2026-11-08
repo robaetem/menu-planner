@@ -12,6 +12,7 @@ Supabase stack run by the Supabase CLI (Docker); production credentials live in
 ```bash
 corepack pnpm db:start          # start local Supabase + apply supabase/migrations
 corepack pnpm db:pull-recipes   # copy recipes, ingredients, tags and photos from production (read-only)
+corepack pnpm db:pull-prod      # replace local household data (plan, freezer, shopping, recipes...) with a read-only copy of production
 corepack pnpm dev --port 3001
 ```
 

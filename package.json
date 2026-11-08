@@ -12,6 +12,7 @@
     "db:stop": "supabase stop",
     "db:status": "supabase status",
     "db:pull-recipes": "node scripts/pull-recipes.mjs",
+    "db:pull-prod": "node scripts/pull-prod-data.mjs",
     "db:reset": "supabase db reset && node scripts/pull-recipes.mjs"
   },
   "dependencies": {
