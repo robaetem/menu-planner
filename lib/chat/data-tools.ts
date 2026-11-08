@@ -12,8 +12,8 @@ import { getDb } from "@/lib/supabase/server";
 import { addIsoDays, todayIso } from "@/lib/date";
 import { getShoppingDocs, listPortions } from "@/lib/data";
 import { loadStock } from "@/lib/freezer/stock-server";
-import { mealStockStatus, type FreezerStock } from "@/lib/freezer/stock";
-import { readyOn } from "@/lib/freezer/potjes";
+import { availableByKey, entryStatus, mealStockStatus, type FreezerStock } from "@/lib/freezer/stock";
+import { potjeChoices, potjeFreeTotals, potjeOverview, type PotjeOverview, type PotjeWhoStatus } from "@/lib/freezer/potjes";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 import type { TemplateVleesje } from "@/lib/types";
 
@@ -381,57 +381,71 @@ export const dataTools = {
 
   getFreezer: tool({
     description:
-      "De diepvries nu: potjes per gerecht en per persoon (hoeveel erin, hoeveel al ingepland om op te eten en wanneer, en potjes die nog gekookt worden), vleesjes en groenten (hoeveel erin, hoeveel vrij, gereserveerd voor welke maaltijd op welke dag) en tekorten voor geplande maaltijden. Optioneel `search` op naam.",
-    inputSchema: z.object({ search: z.string().max(60).optional().describe("Bv. 'hamburger' of 'quiche'") }),
-    execute: async ({ search }) => {
+      "De diepvries nu: potjes per gerecht en per persoon (in de diepvries, vrij nu / vrij vanaf een dag, al ingepland op welke dagen), vleesjes en groenten (hoeveel erin, hoeveel vrij, gereserveerd voor welke maaltijd op welke dag) en tekorten voor geplande maaltijden. Met `date` (de dag waarvoor je een potje inplant) staat er ook `kanInplannenOp`: precies de potjes die de planning voor Samen, Amber en Robin op die dag aanbiedt. Gebruik dat altijd om vrije potjes te noemen of te kiezen; raad nooit. Optioneel `search` op naam.",
+    inputSchema: z.object({
+      search: z.string().max(60).optional().describe("Bv. 'hamburger' of 'quiche'"),
+      date: isoDate.optional().describe("Dag waarvoor je een potje wilt inplannen, yyyy-MM-dd"),
+    }),
+    execute: async ({ search, date }) => {
       const today = todayIso();
       const db = getDb();
       const [portions, vStock, gStock] = await Promise.all([listPortions(), loadStock(db, "vleesje"), loadStock(db, "groente")]);
       const hit = (name: string) => !search || matchesAll(name, search);
 
-      // Potjes: in the freezer now (manual, or cooked before today), and coming (cooked today or later).
-      const potjes = new Map<string, { name: string; inFreezer: Record<string, number>; free: Record<string, number>; plannedToEat: string[] }>();
-      const coming: string[] = [];
-      for (const p of portions) {
-        if (!hit(p.name)) continue;
-        const who = p.who === "robin" ? "Robin" : "Amber";
-        const cooked = !p.sourceMealId || (!!p.cookOn && p.cookOn < today);
-        if (!cooked) {
-          if (p.cookOn)
-            coming.push(`${p.name} voor ${who}: wordt gekookt op ${dayLabel(p.cookOn)}, in de diepvries vanaf ${dayLabel(readyOn(p)!)}${p.eatenOn ? `, al ingepland op ${dayLabel(p.eatenOn)}` : ""}`);
-          continue;
-        }
-        const k = norm(p.name);
-        const e = potjes.get(k) ?? { name: p.name, inFreezer: { Robin: 0, Amber: 0 }, free: { Robin: 0, Amber: 0 }, plannedToEat: [] };
-        e.inFreezer[who]++;
-        if (p.eatenOn) e.plannedToEat.push(`${who} op ${dayLabel(p.eatenOn)}`);
-        else e.free[who]++;
-        potjes.set(k, e);
-      }
+      // Potjes: the same overview the Diepvries tab shows (free = still plannable on some day).
+      const overview = potjeOverview(portions, today).filter((o) => hit(o.name));
+      const person = (s: PotjeWhoStatus) => ({
+        inDiepvries: s.inFreezer,
+        vrij: s.free,
+        ...(s.freeLater ? { waarvanVrijNu: s.freeNow, waarvanNogTeKoken: s.freeLater, vrijVanaf: s.freeLaterOn ? dayLabel(s.freeLaterOn) : null } : {}),
+        ...(s.planned.length ? { ingepland: s.planned.map((p) => dayLabel(p.on)) } : {}),
+      });
+      const perGerecht = (o: PotjeOverview) => ({ naam: o.name, Robin: person(o.who.robin), Amber: person(o.who.amber), vrijVoorSamen: o.freeSamen });
+      const totals = potjeFreeTotals(overview);
+      const kanInplannenOp = date
+        ? {
+            dag: dayLabel(date),
+            ...Object.fromEntries(
+              (
+                [
+                  ["Samen", "both"],
+                  ["Amber", "amber"],
+                  ["Robin", "robin"],
+                ] as const
+              ).map(([label, who]) => [
+                label,
+                potjeChoices(portions, date, who, today)
+                  .filter((c) => hit(c.name))
+                  .map((c) => ({ naam: c.name, aantal: c.count, ...(c.inFreezer < c.count && c.nextReadyOn ? { vanaf: dayLabel(c.nextReadyOn) } : {}) })),
+              ]),
+            ),
+          }
+        : undefined;
 
       // Vleesjes/groenten: reservations whose day has passed are already eaten
       // (the app books them off on the next page load): leave them out here.
+      // Free = the same arithmetic the tabs use (availableByKey / entryStatus).
       const stockView = (s: FreezerStock, unitOf: (u: string) => string) => {
         const eaten = (id: string) => s.reservations.filter((r) => r.entryId === id && r.day < today).reduce((a, r) => a + r.amount, 0);
-        const groups = new Map<string, { name: string; unit: string; inFreezer: number; reserved: { day: string; meal: string; amount: number }[] }>();
-        for (const e of s.entries) {
-          if (!hit(e.name)) continue;
+        const entries = s.entries.filter((e) => hit(e.name)).map((e) => ({ ...e, amount: Math.max(0, e.amount - eaten(e.id)) }));
+        const open = s.reservations.filter((r) => r.day >= today);
+        const free = availableByKey(entries, open);
+        const groups = new Map<string, { name: string; unit: string; reserved: { day: string; meal: string; amount: number }[] }>();
+        for (const e of entries) {
           const k = `${norm(e.name)}|${e.unit}`;
-          const g = groups.get(k) ?? { name: e.name, unit: unitOf(e.unit), inFreezer: 0, reserved: [] };
-          g.inFreezer += Math.max(0, e.amount - eaten(e.id));
-          for (const r of s.reservations.filter((x) => x.entryId === e.id && x.day >= today))
-            g.reserved.push({ day: dayLabel(r.day), meal: r.mealTitle, amount: r.amount });
+          const g = groups.get(k) ?? { name: e.name, unit: unitOf(e.unit), reserved: [] };
+          for (const p of entryStatus(e, open).planned) g.reserved.push({ day: dayLabel(p.day), meal: p.mealTitle, amount: p.amount });
           groups.set(k, g);
         }
-        return [...groups.values()]
-          .filter((g) => g.inFreezer > 0 || g.reserved.length)
-          .map((g) => {
-            const reserved = g.reserved.reduce((a, r) => a + r.amount, 0);
+        return [...free.values()]
+          .map((f) => ({ f, g: groups.get(`${norm(f.name)}|${f.unit}`)! }))
+          .filter(({ f, g }) => f.total > 0 || g.reserved.length)
+          .map(({ f, g }) => {
             const u = g.unit ? ` ${g.unit}` : "";
             return {
               naam: g.name,
-              inDiepvries: `${+g.inFreezer.toFixed(3)}${u}`,
-              vrij: `${Math.max(0, +(g.inFreezer - reserved).toFixed(3))}${u}`,
+              inDiepvries: `${+f.total.toFixed(3)}${u}`,
+              vrij: `${+f.free.toFixed(3)}${u}`,
               ...(g.reserved.length ? { gereserveerd: g.reserved.map((r) => `${+r.amount.toFixed(3)}${u} voor ${r.meal} op ${r.day}`) } : {}),
             };
           })
@@ -443,25 +457,18 @@ export const dataTools = {
             .filter((x) => x.short > 1e-9 && hit(x.name))
             .map((x) => `${dayLabel(d.day)}: ${x.name} (${kind}) ${+x.short.toFixed(3)}${x.unit ? ` ${x.unit}` : ""} tekort; nodig ${+x.wanted.toFixed(3)}, uit de diepvries ${+x.reserved.toFixed(3)}`),
         );
-      const potjesList = [...potjes.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
-      const total = (w: string) => potjesList.reduce((a, p) => a + p.inFreezer[w], 0);
       return {
         today: dayLabel(today),
         potjes: {
-          totaalInDiepvries: `Robin ${total("Robin")}, Amber ${total("Amber")}`,
-          vrijTotaal: `Robin ${potjesList.reduce((a, p) => a + p.free.Robin, 0)}, Amber ${potjesList.reduce((a, p) => a + p.free.Amber, 0)}`,
-          perGerecht: potjesList.map((p) => ({
-            naam: p.name,
-            inDiepvries: `Robin ${p.inFreezer.Robin}, Amber ${p.inFreezer.Amber}`,
-            vrij: `Robin ${p.free.Robin}, Amber ${p.free.Amber}`,
-            ...(p.plannedToEat.length ? { alIngepland: p.plannedToEat } : {}),
-          })),
-          nogTeKoken: coming,
+          vrijTotaal: { Robin: totals.robin, Amber: totals.amber, Samen: totals.samen },
+          perGerecht: overview.map(perGerecht),
         },
+        ...(kanInplannenOp ? { kanInplannenOp } : {}),
         vleesjes: stockView(vStock, () => ""),
         groenten: stockView(gStock, (u) => u),
         tekorten: [...shortages(vStock, "vleesje"), ...shortages(gStock, "groente")],
-        uitleg: "vrij = nog niet ingepland of gereserveerd. Vleesjes en groenten gaan pas van de teller na de dag van de maaltijd; potjes zijn per persoon.",
+        uitleg:
+          "Potjes: vrij = nog niet ingepland om op te eten (nu in de diepvries, of nog te koken en dan vrij vanaf een dag). Samen heeft per gerecht een potje van Robin én van Amber nodig (vrijVoorSamen). kanInplannenOp = wat de planning die dag aanbiedt. Vleesjes en groenten gaan pas van de teller na de dag van de maaltijd; vrij = niet gereserveerd.",
       };
     },
   }),

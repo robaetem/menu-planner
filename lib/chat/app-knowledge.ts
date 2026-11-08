@@ -91,7 +91,7 @@ Inplannen:
 3. Kies een gerecht.
 Onder “In de diepvries” staan potjes die er al zijn, met het aantal. Onder “Wordt nog gemaakt” staan potjes die een eerdere maaltijd nog kookt (“klaar vanaf …”).
 Doorgestreepte potjes kan je niet kiezen: “Al ingepland”, “pas klaar vanaf …” of “geen portie”.
-De app reserveert het oudste potje. Het verdwijnt uit de diepvries zodra de dag voorbij is.`,
+De app reserveert het oudste potje, per persoon dat meeëet. Bij Samen heb je dus een potje van Robin én van Amber met dezelfde naam nodig; heeft maar één van hen het, dan staat het doorgestreept (“geen portie”). Een gereserveerd potje is niet meer vrij. Het verdwijnt uit de diepvries zodra de dag voorbij is.`,
   },
   {
     topic: "vleesjes",
@@ -139,7 +139,8 @@ Met het kruisje sluit je de grafiek. Alleen potjes tellen mee, geen vleesjes of 
 Handmatig invriezen: klik “Nieuw potje”, typ de naam, vul het aantal per persoon in en klik “Potje toevoegen”.
 Aantal corrigeren: klik op een aantal, dan min of plus. Een ingepland potje kan je niet wegnemen.
 Verwijderen: prullenbak, dan “Verwijderen”. Ingeplande of nog te koken potjes blijven staan.
-Bolletjes tonen “Wordt gemaakt …” (amber) en “Ingepland …” (groen).`,
+Bolletjes tonen “Wordt gemaakt …” (amber) en “Ingepland …” (groen).
+“Vrij” is een potje dat nog niet is ingepland: het zit al in de diepvries, of het wordt nog gekookt en is vrij vanaf de dag na het koken.`,
   },
   {
     topic: "vleesjes-en-groenten-beheren",
@@ -247,7 +248,7 @@ Eerder getypte namen van potjes, vleesjes en groenten blijven als suggestie besc
     title: "Wat kan de assistent (chat)?",
     text: `De assistent beantwoordt vragen in gewone taal.
 Hij kan alles bekijken: recepten (zoeken op naam, tag of ingrediënt, en één recept volledig), de planning van elke periode, ook vroeger (wat aten we wanneer, hoe vaak), de diepvries met reserveringen en tekorten, het boodschappenlijstje met de herkomst van elke regel, en de tags en situaties.
-Hij kan ook gegevens aanpassen: situaties, dagnotities, maaltijden plannen of verplaatsen, vleesjes en groenten bij een maaltijd, recepten, tags, situaties en winkelsecties beheren, de diepvries bijwerken en het boodschappenlijstje aanvullen of afvinken. Hij toont dan eerst een kaart met wat er verandert; pas als je op goedkeuren tikt gebeurt het. Daarna kan je het met “Ongedaan maken” terugdraaien, zolang niemand dezelfde gegevens intussen nog aanpaste. Verwijderen doet hij alleen als je er uitdrukkelijk om vraagt.
+Hij kan ook gegevens aanpassen (ook een willekeurig vrij potje voor Samen, Amber of Robin inplannen): situaties, dagnotities, maaltijden plannen of verplaatsen, vleesjes en groenten bij een maaltijd, recepten, tags, situaties en winkelsecties beheren, de diepvries bijwerken en het boodschappenlijstje aanvullen of afvinken. Hij toont dan eerst een kaart met wat er verandert; pas als je op goedkeuren tikt gebeurt het. Daarna kan je het met “Ongedaan maken” terugdraaien, zolang niemand dezelfde gegevens intussen nog aanpaste. Verwijderen doet hij alleen als je er uitdrukkelijk om vraagt.
 Hij kan ook een wijziging aan de app zelf laten bouwen (uiterlijk, knoppen, teksten, gedrag). Hij start het meteen, zonder te vragen; met “Ongedaan maken” op het kaartje zet je het terug.
 Je ziet de voortgang: in wachtrij, bezig, gecontroleerd, gepubliceerd, live. Een veiligheidscontrole kan blokkeren.
 Er loopt maar één wijziging tegelijk, en er zijn er maximaal 10 per dag. Een live wijziging kan je ongedaan laten maken.`,

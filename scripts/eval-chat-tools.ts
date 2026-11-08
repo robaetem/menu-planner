@@ -22,6 +22,7 @@ import { systemPrompt } from "@/lib/chat/system-prompt";
 import { buildChatTools } from "@/lib/chat/tools";
 import { addIsoDays, todayIso } from "@/lib/date";
 import { resolveTitle } from "@/app/(protected)/planning/config";
+import { potjeChoices, potjeFreeTotals, potjeOverview, type Portion, type Who } from "@/lib/freezer/potjes";
 
 const args = process.argv.slice(2);
 const arg = (k: string) => {
@@ -50,7 +51,7 @@ async function snapshot() {
     db.from("vleesjes").select("id, name, count"),
     db.from("groenten").select("id, name, amount, unit"),
     db.from("freezer_reservations").select("amount, vleesje_id, groente_id, meal:plan_meals(day:plan_days(day_date))").is("settled_at", null),
-    db.from("freezer_portions").select("who, name, frozen_on, source:plan_meals!freezer_portions_source_meal_id_fkey(freeform_title, raw_text, template_vleesjes, recipe:recipes(title), day:plan_days(day_date)), eaten:plan_meals!freezer_portions_eaten_by_meal_id_fkey(day:plan_days(day_date))"),
+    db.from("freezer_portions").select("id, who, name, frozen_on, source_meal_id, eaten_by_meal_id, source:plan_meals!freezer_portions_source_meal_id_fkey(freeform_title, raw_text, template_vleesjes, recipe:recipes(title), day:plan_days(day_date)), eaten:plan_meals!freezer_portions_eaten_by_meal_id_fkey(day:plan_days(day_date))"),
     db.from("shopping_doc").select("content, generated_content, generated_origins").order("id").limit(1).maybeSingle(),
   ]);
   for (const r of [days, recipes, tags, modes, vleesjes, groenten, res, portions, shop]) if (r.error) throw r.error;
@@ -88,6 +89,17 @@ async function snapshot() {
     const inFreezer = !(eatenOn && eatenOn < TODAY) && (!p.source || (!!cookOn && cookOn < TODAY));
     return { who: p.who, name, cookOn, eatenOn, inFreezer };
   });
+  // The same portions in the shape the app's own freezer rules take (lib/freezer/potjes).
+  const portionModel: Portion[] = portions.data!.map((p: any, i: number) => ({
+    id: p.id,
+    who: p.who as Who,
+    name: potjes[i].name.trim(),
+    sourceMealId: p.source_meal_id,
+    cookOn: potjes[i].cookOn,
+    frozenOn: p.frozen_on,
+    eatenByMealId: p.eaten_by_meal_id,
+    eatenOn: potjes[i].eatenOn,
+  }));
   return {
     days: sdays,
     meals: sdays.flatMap((d) => d.meals),
@@ -97,6 +109,7 @@ async function snapshot() {
     vleesjes: byName(stock(vleesjes.data!, "vleesje_id", (e) => Number(e.count))),
     groenten: byName(stock(groenten.data!, "groente_id", (e) => Number(e.amount))),
     potjes,
+    portionModel,
     shop: shop.data as any,
     sections,
   };
@@ -149,6 +162,13 @@ const stockLine = (e: any) => `${e.name}: ${e.amount}${e.unit ? " " + e.unit : "
 
 const NEXT_MON = (() => { let d = addIsoDays(TODAY, 1); while (dow(d) !== 1) d = addIsoDays(d, 1); return d; })();
 
+// Free potjes as the app's Diepvries overview and the planning menu see them (lib/freezer/potjes).
+const potjeTruth = (s: Snap) => {
+  const ov = potjeOverview(s.portionModel, TODAY);
+  const t = potjeFreeTotals(ov);
+  return `vrij totaal: Robin ${t.robin}, Amber ${t.amber}, Samen ${t.samen}\n` + ov.map((o) => `${o.name}: Robin ${o.who.robin.free} vrij (${o.who.robin.freeNow} nu${o.who.robin.freeLaterOn ? `, rest vanaf ${o.who.robin.freeLaterOn}` : ""}), Amber ${o.who.amber.free} vrij (${o.who.amber.freeNow} nu${o.who.amber.freeLaterOn ? `, rest vanaf ${o.who.amber.freeLaterOn}` : ""}), Samen ${o.freeSamen}`).join("\n");
+};
+const choicesTruth = (s: Snap, date: string, who: "both" | Who) => potjeChoices(s.portionModel, date, who, TODAY).map((c) => `${c.name} (${c.count}${c.inFreezer < c.count && c.nextReadyOn ? `, vanaf ${c.nextReadyOn}` : ""})`).join(", ") || "niets";
 type Q = { id: string; cat: string; turns: string[]; truth: (s: Snap) => string; expectTool?: "proposeChange" | "request_change" | "none" };
 const Qs: Q[] = [
   // planning
@@ -188,6 +208,9 @@ const Qs: Q[] = [
   // freezer
   { id: "potjes-count", cat: "freezer", turns: ["Hoeveel potjes zitten er nu in de diepvries?"], truth: (s) => potjesNow(s) },
   { id: "amber-potjes", cat: "freezer", turns: ["Welke potjes heeft Amber nog in de diepvries?"], truth: (s) => potjesNow(s, "amber") },
+  { id: "pot-samen-2111", cat: "freezer", turns: ["zet een diepvriespotje voor samen op zaterdag 21/11"], truth: (s) => `Samen op 2026-11-21 kan enkel: ${choicesTruth(s, "2026-11-21", "both")}. Goed: proposeChange met addPotjeMeal {date 2026-11-21, who Samen, potje = een naam uit die lijst} (of, zonder naam, laat de app kiezen). FOUT: een potje dat Amber of Robin niet heeft (bv. een Robin-only quiche). Mislukt het toch, dan noemt het antwoord de echte reden en wat wel kan.\n${potjeTruth(s)}`, expectTool: "proposeChange" },
+  { id: "pot-random-amber", cat: "freezer", turns: ["zet een diepvriespotje voor samen op zaterdag 21/11", "zet dan gewoon een random potje voor amber"], truth: (s) => `Amber op 2026-11-21 kan: ${choicesTruth(s, "2026-11-21", "amber")}. Goed: proposeChange met addPotjeMeal {date 2026-11-21, who Amber} zonder potje of met een naam uit die lijst. FOUT: zeggen dat Amber geen vrij potje heeft terwijl de lijst niet leeg is.\n${potjeTruth(s)}`, expectTool: "proposeChange" },
+  { id: "pot-free-amber", cat: "freezer", turns: ["welke potjes zijn nog vrij voor Amber?"], truth: (s) => { const ov = potjeOverview(s.portionModel, TODAY).filter((o) => o.who.amber.free > 0); return `Vrij voor Amber (totaal ${potjeFreeTotals(ov).amber}): ${ov.map((o) => `${o.name} ${o.who.amber.free}${o.who.amber.freeNow < o.who.amber.free ? ` (vanaf ${o.who.amber.freeLaterOn})` : ""}`).join(", ") || "geen"}.`; } },
   { id: "hamburgers", cat: "freezer", turns: ["Hoeveel hamburgers liggen er nog in de diepvries?"], truth: (s) => s.vleesjes.filter((v) => /hamburger/i.test(v.name)).map(stockLine).join("\n") },
   { id: "free-vlees", cat: "freezer", turns: ["Welke vleesjes zijn er nog vrij in de diepvries (niet gereserveerd)?"], truth: (s) => s.vleesjes.filter((v) => v.amount - v.reserved.reduce((a: number, r: any) => a + r.amount, 0) > 0).map((v) => `${v.name}: ${v.amount - v.reserved.reduce((a: number, r: any) => a + r.amount, 0)} vrij`).join("\n") },
   { id: "groenten", cat: "freezer", turns: ["Welke groenten liggen er in de diepvries?"], truth: (s) => s.groenten.map(stockLine).join("\n") },

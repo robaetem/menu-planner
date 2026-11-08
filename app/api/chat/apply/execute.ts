@@ -8,6 +8,9 @@ import type { Op } from "@/lib/chat/ops";
 import type { Assignee, IngredientRow } from "@/lib/types";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 import { normalizeRecipeImageUrl } from "@/lib/recipes/images";
+import { todayIso } from "@/lib/date";
+import { listPortions } from "@/lib/data";
+import { potjeBlockReason, potjeChoices, type Who } from "@/lib/freezer/potjes";
 import {
   assignRecipe,
   deleteMeal,
@@ -31,6 +34,8 @@ import { generateShoppingList, saveShoppingDoc } from "@/app/(protected)/boodsch
 import { revalidatePath } from "next/cache";
 
 const BOX: Record<string, Assignee> = { Samen: "both", Amber: "amber", Robin: "robin" };
+/** Words that mean "any potje will do". */
+const ANY_POTJE = new Set(["willekeurig", "random", "eender welk", "maakt niet uit", "maakt niet uit welk", "om het even", "gewoon een potje", "een potje"]);
 const WHO = { Amber: "amber", Robin: "robin" } as const;
 const norm = (s: unknown) =>
   String(s ?? "")
@@ -165,9 +170,28 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
       await assignRecipe(op.date, BOX[op.who], r.id);
       return `${r.title} gepland op ${formatDayLabel(op.date)} (${op.who})`;
     }
-    case "addPotjeMeal":
-      await planPotje(op.date, BOX[op.who], op.potje);
-      return `Potje ${op.potje} gepland op ${formatDayLabel(op.date)} (${op.who})`;
+    case "addPotjeMeal": {
+      const box = BOX[op.who];
+      const portions = await listPortions();
+      const today = todayIso();
+      const choices = potjeChoices(portions, op.date, box === "both" ? "both" : (box as Who), today);
+      const anyPotje = !op.potje || ANY_POTJE.has(norm(op.potje));
+      let name = op.potje ?? "";
+      if (anyPotje) {
+        // Choices are sorted: dishes already in the freezer first.
+        if (!choices.length) throw new Error(`Er is geen vrij potje voor ${op.who} op ${formatDayLabel(op.date)}.`);
+        name = choices[0].name;
+      } else {
+        const reason = potjeBlockReason(portions, name, op.date, box === "both" ? "both" : (box as Who), today, undefined, formatDayLabel);
+        if (reason) {
+          const fits = choices.map((c) => c.name).slice(0, 5);
+          throw new Error(`${reason}${fits.length ? ` Voor ${op.who} op ${formatDayLabel(op.date)} kan: ${fits.join(", ")}.` : ` Voor ${op.who} op ${formatDayLabel(op.date)} is er geen vrij potje.`}`);
+        }
+        name = choices.find((c) => norm(c.name) === norm(name))?.name ?? name;
+      }
+      await planPotje(op.date, box, name);
+      return `Potje ${name} gepland op ${formatDayLabel(op.date)} (${op.who})`;
+    }
     case "moveMeal": {
       const m = await findMeal(db, op.date, op.meal, op.who);
       await moveMeal(m.id, op.toDate, op.toWho ? BOX[op.toWho] : m.assignee);

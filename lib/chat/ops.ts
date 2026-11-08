@@ -30,7 +30,7 @@ export const OpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("setSituation"), date, who: person, situation: name.describe("Label van de situatie, of 'Thuis'") }),
   z.object({ op: z.literal("setDayNote"), date, note: text.describe("Lege tekst wist de notitie") }),
   z.object({ op: z.literal("addMeal"), date, who: box, recipe: name.describe("Titel van het recept") }),
-  z.object({ op: z.literal("addPotjeMeal"), date, who: box, potje: name.describe("Naam van het potje in de diepvries") }),
+  z.object({ op: z.literal("addPotjeMeal"), date, who: box, potje: name.optional().describe("Naam van het potje in de diepvries (uit getFreezer). Weglaten of 'willekeurig' als ze zegt: een random/eender welk potje; de app kiest dan zelf een vrij potje") }),
   z.object({ op: z.literal("moveMeal"), ...mealRef, toDate: date, toWho: box.optional() }),
   z.object({
     op: z.literal("setMealVleesjes"),

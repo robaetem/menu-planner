@@ -27,6 +27,8 @@ function walk(dir: string): string[] {
   });
 }
 for (const file of walk("lib/chat")) {
+  // image-store.ts is browser IndexedDB (its .delete is an object-store call, not a database write).
+  if (file.endsWith("image-store.ts")) continue;
   const src = readFileSync(file, "utf8");
   for (const re of FORBIDDEN) check(`${file} has no ${re}`, !re.test(src));
 }
@@ -49,8 +51,8 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   "@/lib/date": ["addIsoDays", "todayIso"],
   "@/lib/data": ["getShoppingDocs", "listPortions", "listRecipes", "getRecipe", "listVleesjes", "listGroenten", "listTags", "listModes", "listCategories", "getHousehold"],
   "@/lib/freezer/stock-server": ["loadStock"],
-  "@/lib/freezer/stock": ["mealStockStatus", "type FreezerStock", "FreezerStock"],
-  "@/lib/freezer/potjes": ["readyOn"],
+  "@/lib/freezer/stock": ["mealStockStatus", "availableByKey", "entryStatus", "type FreezerStock", "FreezerStock"],
+  "@/lib/freezer/potjes": ["potjeChoices", "potjeFreeTotals", "potjeOverview", "type PotjeOverview", "type PotjeWhoStatus"],
   "@/app/(protected)/planning/config": ["resolveTitle"],
   "@/lib/types": ["*"],
   "@/lib/change/github": ["gh", "repo"],
@@ -276,4 +278,63 @@ async function dbTests() {
   check("undo conflict refused", uf.status === 409 && uf.body.ok === false, uf);
   check("conflicting edit kept", (await db.from("plan_days").select("note").eq("day_date", D(14)).maybeSingle()).data?.note === "later met de hand");
   await db.from("plan_days").delete().eq("day_date", D(14)); // test cleanup (local DB only)
+
+  // g. Potjes (prod transcript 2026-11-08): getFreezer matches the Diepvries overview, addPotjeMeal
+  // explains why a potje does not fit and can pick "any" potje. Own rows only ("Chattest ..."), undone after.
+  {
+    const { potjeFreeTotals, potjeOverview } = await import("../lib/freezer/potjes");
+    const { listPortions } = await import("../lib/data");
+    const { todayIso } = await import("../lib/date");
+    const sG = await state();
+    const fixture = await post([
+      { op: "createRecipe", title: "Chattest courgette" },
+      { op: "createRecipe", title: "Chattest pastinaak" },
+      { op: "addPotjes", name: "Chattest quiche", robin: 1, amber: 0 },
+      { op: "addPotjes", name: "Chattest hamrol", robin: 1, amber: 2 },
+      { op: "addPotjes", name: "Chattest vol", robin: 1, amber: 1 },
+      { op: "addMeal", date: D(15), who: "Samen", recipe: "Chattest courgette" },
+      { op: "setExtraPotjes", date: D(15), meal: "Chattest courgette", robin: 1, amber: 1 },
+      { op: "addMeal", date: D(16), who: "Amber", recipe: "Chattest pastinaak" },
+      { op: "setExtraPotjes", date: D(16), meal: "Chattest pastinaak", robin: 0, amber: 1 },
+      { op: "addPotjeMeal", date: D(18), who: "Samen", potje: "Chattest hamrol" },
+      { op: "addPotjeMeal", date: D(19), who: "Samen", potje: "Chattest vol" },
+    ]);
+    check("potjes fixture applied", fixture.ok === true, fixture);
+
+    const today = todayIso();
+    const mine = (await listPortions()).filter((p) => /^chattest/i.test(p.name));
+    const truth = potjeFreeTotals(potjeOverview(mine, today));
+    const fz: any = await (dataTools.getFreezer as any).execute({ search: "chattest", date: D(21) }, {});
+    const t = fz.potjes.vrijTotaal;
+    check("getFreezer vrij totals match potjeFreeTotals", t.Robin === truth.robin && t.Amber === truth.amber && t.Samen === truth.samen, { t, truth });
+    check("getFreezer vrij totals are the fixture's (Robin 2, Amber 3, Samen 1)", t.Robin === 2 && t.Amber === 3 && t.Samen === 1, t);
+    const row = (n: string) => fz.potjes.perGerecht.find((g: any) => g.naam === n);
+    check("hamrol: Amber 1 free now, Samen-planned day listed", row("Chattest hamrol")?.Amber.vrij === 1 && row("Chattest hamrol")?.Amber.waarvanVrijNu === undefined && row("Chattest hamrol")?.Robin.ingepland?.length === 1, row("Chattest hamrol"));
+    check("pastinaak is free later, not now", row("Chattest pastinaak")?.Amber.vrij === 1 && row("Chattest pastinaak")?.Amber.waarvanNogTeKoken === 1 && !!row("Chattest pastinaak")?.Amber.vrijVanaf, row("Chattest pastinaak"));
+    check("fully planned potje is not free", row("Chattest vol")?.Robin.vrij === 0 && row("Chattest vol")?.Amber.vrij === 0 && row("Chattest vol")?.vrijVoorSamen === 0, row("Chattest vol"));
+    const names = (l: any[]) => l.map((c) => c.naam).sort().join(",");
+    check("kanInplannenOp Samen: only courgette", names(fz.kanInplannenOp.Samen) === "Chattest courgette", fz.kanInplannenOp);
+    check("kanInplannenOp Amber", names(fz.kanInplannenOp.Amber) === "Chattest courgette,Chattest hamrol,Chattest pastinaak", fz.kanInplannenOp.Amber);
+    check("kanInplannenOp Robin", names(fz.kanInplannenOp.Robin) === "Chattest courgette,Chattest quiche", fz.kanInplannenOp.Robin);
+
+    const sBefore = await state();
+    const bad = await post([{ op: "addPotjeMeal", date: D(21), who: "Samen", potje: "Chattest quiche" }]);
+    check("Samen quiche fails with the Amber reason", bad.ok === false && /Amber heeft geen potje “Chattest quiche”/.test(bad.error) && /kan: .*Chattest courgette/.test(bad.error), bad);
+    check("failed potje change rolled back", (await state()) === sBefore);
+
+    const any = await post([{ op: "addPotjeMeal", date: D(21), who: "Amber" }]);
+    check("Amber without name picks a potje", any.ok === true && /^Potje .+ gepland op/.test(any.summary), any);
+    const planned = (await db.from("plan_meals").select("freeform_title, from_freezer, assignee, day:plan_days!inner(day_date)").eq("day.day_date", D(21))).data as any[];
+    check("the random potje is a real Amber potje meal", planned.length === 1 && planned[0].from_freezer && planned[0].assignee === "amber", planned);
+    const ua2 = await undoReq(any.undoId);
+    check("undo random potje restores the snapshot", ua2.body.ok === true && (await state()) === sBefore, ua2);
+
+    const anyBoth = await post([{ op: "addPotjeMeal", date: D(21), who: "Samen", potje: "willekeurig" }]);
+    check("Samen 'willekeurig' picks the first Samen choice", anyBoth.ok === true, anyBoth);
+    if (anyBoth.undoId) await undoReq(anyBoth.undoId);
+
+    // cleanup: undo the fixture
+    check("undo potjes fixture", (await undoReq(fixture.undoId)).body.ok === true);
+    check("undo restores the exact state (potjes)", (await state()) === sG);
+  }
 }
