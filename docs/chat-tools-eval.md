@@ -11,7 +11,7 @@ table, runs the ops through the app's own server actions, keeps only the changed
 after) in `chat_data_changes`, and rolls everything back when one op fails. `POST
 /api/chat/apply/<undoId>/undo` puts the rows back, unless someone edited them since (409, nothing written).
 
-App changes: `request_change`, unchanged: the bot asks "Zal ik ...?" and calls it only after a yes.
+App changes: `request_change`, the bot calls it at once, without a confirmation question; the run card's undo is the safety net.
 
 ## Coverage: every action in the app
 

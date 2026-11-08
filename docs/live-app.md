@@ -8,7 +8,7 @@ The Vercel app keeps the old GitHub Actions flow (no `LIVE_WORKER_URL` there).
 
 ## Flow
 
-1. Chat: Amber asks, the assistant asks "Zal ik ...?", she says ja, `request_change` runs.
+1. Chat: Amber asks, the assistant calls `request_change` at once (no "Zal ik ...?"; the card's "Ongedaan maken" is the safety net).
 2. `lib/change/runs.ts` (live mode, `LIVE_WORKER_URL` set) stores the `change_runs` row and posts the
    request (plus any chat photos) to the worker on `127.0.0.1:3411`.
 3. `scripts/live/worker.ts`, one change at a time:

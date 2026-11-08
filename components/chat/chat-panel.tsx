@@ -7,6 +7,7 @@ import { ArrowUp, ChevronRight, ImagePlus, Sparkles, Trash2, X } from "lucide-re
 import { toast } from "sonner";
 import { compressImage } from "@/lib/image-compress";
 import { MAX_IMAGES, stripOldImages } from "@/lib/chat/images";
+import { clearImages, loadImages, saveImages } from "@/lib/chat/image-store";
 import { Button } from "@/components/ui/button";
 import {
   ChatContainerContent,
@@ -57,13 +58,50 @@ const transport = new DefaultChatTransport({
   prepareSendMessagesRequest: ({ messages, body }) => ({ body: { ...body, messages: stripOldImages(messages) } }),
 });
 
-/** Never persist photo data URLs in localStorage. */
-function withoutImages(messages: UIMessage[]): UIMessage[] {
-  return messages.map((m) =>
-    m.parts.some((p) => p.type === "file")
-      ? { ...m, parts: m.parts.map((p) => (p.type === "file" ? { type: "text" as const, text: "[foto]" } : p)) }
-      : m,
+/** Photo thumbnail; tap to enlarge. */
+function ChatImage({ src }: { src: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" aria-label="Foto vergroten" onClick={() => setOpen(true)} className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="Foto" className="size-24 rounded-2xl object-cover" />
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Foto"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setOpen(false)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="Foto" className="max-h-full max-w-full rounded-xl object-contain" />
+          <button
+            type="button"
+            aria-label="Sluiten"
+            className="absolute right-4 top-4 flex size-9 items-center justify-center rounded-full bg-white/90 text-black"
+            onClick={() => setOpen(false)}
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+      )}
+    </>
   );
+}
+
+/** The bot's acknowledgement belongs before the change card: move text that follows a
+ *  request_change card in front of it, or drop it when the message already has a line before the card. */
+function acknowledgeFirst(parts: UIMessage["parts"]): UIMessage["parts"] {
+  const at = parts.findIndex((p) => p.type === "tool-request_change");
+  if (at < 0) return parts;
+  const before = parts.slice(0, at);
+  const after = parts.slice(at + 1);
+  const hasLine = before.some((p) => p.type === "text" && p.text.trim() !== "");
+  const lateText = after.filter((p) => p.type === "text");
+  if (!lateText.length) return parts;
+  const rest = after.filter((p) => p.type !== "text");
+  return [...before, ...(hasLine ? [] : lateText), parts[at], ...rest];
 }
 
 function ToolPart({
@@ -116,7 +154,7 @@ function renderParts(m: UIMessage, addToolResult: AddToolResult) {
     if (run.length) out.push(<ToolSteps key={`s${key}`} parts={run} />);
     run = [];
   };
-  m.parts.forEach((part, i) => {
+  acknowledgeFirst(m.parts).forEach((part, i) => {
     if (isStepPart(part)) {
       run.push(part);
       return;
@@ -125,7 +163,7 @@ function renderParts(m: UIMessage, addToolResult: AddToolResult) {
     if (part.type === "file" && part.mediaType.startsWith("image/")) {
       out.push(
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={i} src={part.url} alt="Foto" className="max-h-48 max-w-full rounded-2xl object-cover" />,
+        <ChatImage key={i} src={part.url} />,
       );
     } else if (part.type === "text") {
       if (!part.text) return;
@@ -181,23 +219,29 @@ export function ChatPanel({
   React.useEffect(() => {
     if (restoredFor.current === storageKey) return;
     restoredFor.current = storageKey;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) setMessages(JSON.parse(raw) as UIMessage[]);
-    } catch {
-      /* corrupt storage: start fresh */
-    }
-    setLoaded(true);
+    void (async () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) setMessages(await loadImages(JSON.parse(raw) as UIMessage[]));
+      } catch {
+        /* corrupt storage: start fresh */
+      }
+      setLoaded(true);
+    })();
   }, [storageKey, setMessages]);
 
   React.useEffect(() => {
     if (!loaded || status === "streaming" || status === "submitted") return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(withoutImages(messages.slice(-60))));
-    } catch {
-      /* storage full: ignore */
-    }
-  }, [messages, status, storageKey, loaded]);
+    const recent = messages.slice(-60);
+    void (async () => {
+      try {
+        // Photos go to IndexedDB; the saved chat keeps only a pointer.
+        localStorage.setItem(storageKey, JSON.stringify(await saveImages(userId, recent)));
+      } catch {
+        /* storage full: ignore */
+      }
+    })();
+  }, [messages, status, storageKey, loaded, userId]);
 
   const busy = status === "submitted" || status === "streaming";
   const [images, setImages] = React.useState<string[]>([]);
@@ -239,7 +283,11 @@ export function ChatPanel({
               size="icon-sm"
               aria-label="Nieuw gesprek"
               title="Nieuw gesprek"
-              onClick={() => setMessages([])}
+              onClick={() => {
+                setMessages([]);
+                localStorage.removeItem(storageKey);
+                void clearImages(userId);
+              }}
             >
               <Trash2 className="size-4" />
             </Button>
