@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai";
-import { ArrowUp, ChevronRight, ImagePlus, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowUp, ChevronRight, ImagePlus, Sparkle, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { compressImage } from "@/lib/image-compress";
 import { MAX_IMAGES, stripOldImages } from "@/lib/chat/images";
@@ -230,7 +230,7 @@ export function ChatPanel({
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <Sparkles className="size-4 text-muted-foreground" />
+        <Sparkle className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold tracking-tight">Assistent</h2>
         <div className="ml-auto flex items-center gap-0.5">
           {messages.length > 0 && (
@@ -256,7 +256,7 @@ export function ChatPanel({
             {messages.length === 0 ? (
               <div className="flex flex-col items-center gap-5 pt-10 text-center">
                 <div className="flex size-11 items-center justify-center rounded-full bg-muted">
-                  <Sparkles className="size-5 text-muted-foreground" />
+                  <Sparkle className="size-5 text-muted-foreground" />
                 </div>
                 <div>
                   <p className="font-medium">Waarmee kan ik helpen?</p>
