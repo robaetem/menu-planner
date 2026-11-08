@@ -30,11 +30,7 @@ export function buildChatTools(email: string, opts: { images?: string[] } = {}) 
         request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands."),
       }),
       execute: async ({ request }) => {
-        const r = await (startChange as (e: string, r: string, i?: string[]) => ReturnType<typeof startChange>)(
-          email,
-          request,
-          opts.images?.length ? opts.images : undefined,
-        );
+        const r = await startChange(email, request, opts.images?.length ? opts.images : undefined);
         return r.ok ? { runId: r.runId } : { error: r.error };
       },
     }),
