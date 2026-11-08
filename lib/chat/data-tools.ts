@@ -425,7 +425,7 @@ export const dataTools = {
       // Vleesjes/groenten: reservations whose day has passed are already eaten
       // (the app books them off on the next page load): leave them out here.
       // Free = the same arithmetic the tabs use (availableByKey / entryStatus).
-      const stockView = (s: FreezerStock, unitOf: (u: string) => string) => {
+      const stockView = (s: FreezerStock, unitOf: (u: string) => string, pieces: boolean) => {
         const eaten = (id: string) => s.reservations.filter((r) => r.entryId === id && r.day < today).reduce((a, r) => a + r.amount, 0);
         const entries = s.entries.filter((e) => hit(e.name)).map((e) => ({ ...e, amount: Math.max(0, e.amount - eaten(e.id)) }));
         const open = s.reservations.filter((r) => r.day >= today);
@@ -437,19 +437,33 @@ export const dataTools = {
           for (const p of entryStatus(e, open).planned) g.reserved.push({ day: dayLabel(p.day), meal: p.mealTitle, amount: p.amount });
           groups.set(k, g);
         }
-        return [...free.values()]
+        const items = [...free.values()]
           .map((f) => ({ f, g: groups.get(`${norm(f.name)}|${f.unit}`)! }))
           .filter(({ f, g }) => f.total > 0 || g.reserved.length)
           .map(({ f, g }) => {
             const u = g.unit ? ` ${g.unit}` : "";
             return {
-              naam: g.name,
-              inDiepvries: `${+f.total.toFixed(3)}${u}`,
-              vrij: `${+f.free.toFixed(3)}${u}`,
-              ...(g.reserved.length ? { gereserveerd: g.reserved.map((r) => `${+r.amount.toFixed(3)}${u} voor ${r.meal} op ${r.day}`) } : {}),
+              free: f.free,
+              unit: g.unit,
+              row: {
+                naam: g.name,
+                inDiepvries: `${+f.total.toFixed(3)}${u}`,
+                vrij: `${+f.free.toFixed(3)}${u}`,
+                ...(g.reserved.length ? { gereserveerd: g.reserved.map((r) => `${+r.amount.toFixed(3)}${u} voor ${r.meal} op ${r.day}`) } : {}),
+              },
             };
           })
-          .sort((a, b) => a.naam.localeCompare(b.naam, "nl"));
+          .sort((a, b) => a.row.naam.localeCompare(b.row.naam, "nl"));
+        // Same counting as the tabs (free per entry): quote these numbers, never count the list.
+        const open_ = items.filter((i) => i.free > 1e-9);
+        const perUnit: Record<string, number> = {};
+        for (const i of open_) perUnit[i.unit] = +((perUnit[i.unit] ?? 0) + i.free).toFixed(3);
+        return {
+          aantalSoortenVrij: open_.length,
+          totaalVrij: pieces ? open_.reduce((a, i) => a + i.free, 0) : perUnit,
+          vrij: open_.map((i) => i.row),
+          volledigIngepland: items.filter((i) => i.free <= 1e-9).map((i) => i.row),
+        };
       };
       const shortages = (s: FreezerStock, kind: string) =>
         s.demands.flatMap((d) =>
@@ -464,11 +478,11 @@ export const dataTools = {
           perGerecht: overview.map(perGerecht),
         },
         ...(kanInplannenOp ? { kanInplannenOp } : {}),
-        vleesjes: stockView(vStock, () => ""),
-        groenten: stockView(gStock, (u) => u),
+        vleesjes: stockView(vStock, () => "", true),
+        groenten: stockView(gStock, (u) => u, false),
         tekorten: [...shortages(vStock, "vleesje"), ...shortages(gStock, "groente")],
         uitleg:
-          "Potjes: vrij = nog niet ingepland om op te eten (nu in de diepvries, of nog te koken en dan vrij vanaf een dag). Samen heeft per gerecht een potje van Robin én van Amber nodig (vrijVoorSamen). kanInplannenOp = wat de planning die dag aanbiedt. Vleesjes en groenten gaan pas van de teller na de dag van de maaltijd; vrij = niet gereserveerd.",
+          "Potjes: vrij = nog niet ingepland om op te eten (nu in de diepvries, of nog te koken en dan vrij vanaf een dag). Samen heeft per gerecht een potje van Robin én van Amber nodig (vrijVoorSamen). kanInplannenOp = wat de planning die dag aanbiedt. Vleesjes en groenten gaan pas van de teller na de dag van de maaltijd; vrij = niet gereserveerd. vleesjes/groenten: aantalSoortenVrij en totaalVrij (vleesjes in stuks, groenten per eenheid) zijn dezelfde getallen als in de tab; citeer die, tel de lijst nooit zelf; volledigIngepland is niet vrij.",
       };
     },
   }),
