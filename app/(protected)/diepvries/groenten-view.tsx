@@ -124,7 +124,7 @@ export function GroentenView({
           {shown.length === 0 ? (
             <NoneFree>Alles in de diepvries is al ingepland.</NoneFree>
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
               {shown.map(({ g: groente, free, total }) => (
                 <div
                   key={groente.id}
