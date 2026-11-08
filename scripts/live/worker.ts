@@ -28,7 +28,7 @@ const CONFIG = {
   sync: env("LIVE_SYNC", "1") === "1",
   agentTimeoutMs: 150_000,
 };
-const RUN_AGENT = join(__dirname, "run-agent.sh");
+const RUN_AGENT = process.env.LIVE_AGENT_SCRIPT || join(__dirname, "run-agent.sh"); // override only in tests
 
 type Status = "queued" | "running" | "checking" | "live" | "failed" | "blocked" | "undoing" | "undone";
 type Run = {
@@ -453,7 +453,7 @@ async function body(req: IncomingMessage): Promise<any> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 const view = (r: Run) => ({
-  status: r.status, step: r.step, summary: r.summary, reason: r.reason, prUrl: r.prUrl,
+  status: r.status, step: r.step, summary: r.status === "blocked" ? undefined : r.summary, reason: r.reason, prUrl: r.prUrl,
   canUndo: r.status === "live" && !!r.sha, timings: r.timings,
 });
 
