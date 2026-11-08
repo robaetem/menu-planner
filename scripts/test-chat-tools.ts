@@ -11,6 +11,7 @@ import { APP_KNOWLEDGE } from "../lib/chat/app-knowledge";
 import { appGuideTools } from "../lib/chat/app-guide";
 import { DELETE_OPS, OpSchema, OpsSchema, ProposeChangeInput } from "../lib/chat/ops";
 import { buildChatTools } from "../lib/chat/tools";
+import { systemPrompt } from "../lib/chat/system-prompt";
 
 let failed = 0;
 function check(name: string, ok: boolean, extra?: unknown) {
@@ -27,6 +28,8 @@ function walk(dir: string): string[] {
   });
 }
 for (const file of walk("lib/chat")) {
+  // image-store.ts is browser IndexedDB (its .delete is an object-store call, not a database write).
+  if (file.endsWith("image-store.ts")) continue;
   const src = readFileSync(file, "utf8");
   for (const re of FORBIDDEN) check(`${file} has no ${re}`, !re.test(src));
 }
@@ -49,8 +52,8 @@ const ALLOWED_IMPORTS: Record<string, string[]> = {
   "@/lib/date": ["addIsoDays", "todayIso"],
   "@/lib/data": ["getShoppingDocs", "listPortions", "listRecipes", "getRecipe", "listVleesjes", "listGroenten", "listTags", "listModes", "listCategories", "getHousehold"],
   "@/lib/freezer/stock-server": ["loadStock"],
-  "@/lib/freezer/stock": ["mealStockStatus", "type FreezerStock", "FreezerStock"],
-  "@/lib/freezer/potjes": ["readyOn"],
+  "@/lib/freezer/stock": ["mealStockStatus", "availableByKey", "entryStatus", "type FreezerStock", "FreezerStock"],
+  "@/lib/freezer/potjes": ["potjeChoices", "potjeFreeTotals", "potjeOverview", "type PotjeOverview", "type PotjeWhoStatus"],
   "@/app/(protected)/planning/config": ["resolveTitle"],
   "@/lib/types": ["*"],
   "@/lib/change/github": ["gh", "repo"],
@@ -161,6 +164,14 @@ check("norm folds quotes and accents", norm("Z’n Grieks Crème") === "z'n grie
 check("matchesAll every word", matchesAll("Pittige risotto met prei en scampi's", "risotto scampi") && !matchesAll("Prei", "risotto prei"));
 check("matchesAll plural", matchesAll("Hamburger", "hamburgers"));
 check("dayLabel has weekday", /^za 7 nov/.test(dayLabel("2026-11-07")), dayLabel("2026-11-07"));
+
+// 5b. system prompt rules (e2e 2026-11-08)
+{
+  const sp = systemPrompt("2026-11-08");
+  check("prompt: deze week = 7 days incl. vr/za, not 5", /komende 7 dagen/.test(sp) && !/eerste 5 dagen/.test(sp));
+  check("prompt: no self-correction", /nooit jezelf verbeteren/.test(sp));
+  check("prompt: quote freezer totals, tag ops", /aantalSoortenVrij/.test(sp) && /addTags/.test(sp));
+}
 
 // 6. app guide
 check("app knowledge has topics", APP_KNOWLEDGE.length >= 12 && APP_KNOWLEDGE.every((k) => k.topic && k.title && k.text.length > 80));
@@ -276,4 +287,154 @@ async function dbTests() {
   check("undo conflict refused", uf.status === 409 && uf.body.ok === false, uf);
   check("conflicting edit kept", (await db.from("plan_days").select("note").eq("day_date", D(14)).maybeSingle()).data?.note === "later met de hand");
   await db.from("plan_days").delete().eq("day_date", D(14)); // test cleanup (local DB only)
+
+  // g. Potjes (prod transcript 2026-11-08): getFreezer matches the Diepvries overview, addPotjeMeal
+  // explains why a potje does not fit and can pick "any" potje. Own rows only ("Chattest ..."), undone after.
+  {
+    const { potjeFreeTotals, potjeOverview } = await import("../lib/freezer/potjes");
+    const { listPortions } = await import("../lib/data");
+    const { todayIso } = await import("../lib/date");
+    const sG = await state();
+    const fixture = await post([
+      { op: "createRecipe", title: "Chattest courgette" },
+      { op: "createRecipe", title: "Chattest pastinaak" },
+      { op: "addPotjes", name: "Chattest quiche", robin: 1, amber: 0 },
+      { op: "addPotjes", name: "Chattest hamrol", robin: 1, amber: 2 },
+      { op: "addPotjes", name: "Chattest vol", robin: 1, amber: 1 },
+      { op: "addMeal", date: D(15), who: "Samen", recipe: "Chattest courgette" },
+      { op: "setExtraPotjes", date: D(15), meal: "Chattest courgette", robin: 1, amber: 1 },
+      { op: "addMeal", date: D(16), who: "Amber", recipe: "Chattest pastinaak" },
+      { op: "setExtraPotjes", date: D(16), meal: "Chattest pastinaak", robin: 0, amber: 1 },
+      { op: "addPotjeMeal", date: D(18), who: "Samen", potje: "Chattest hamrol" },
+      { op: "addPotjeMeal", date: D(19), who: "Samen", potje: "Chattest vol" },
+    ]);
+    check("potjes fixture applied", fixture.ok === true, fixture);
+
+    const today = todayIso();
+    const mine = (await listPortions()).filter((p) => /^chattest/i.test(p.name));
+    const truth = potjeFreeTotals(potjeOverview(mine, today));
+    const fz: any = await (dataTools.getFreezer as any).execute({ search: "chattest", date: D(21) }, {});
+    const t = fz.potjes.vrijTotaal;
+    check("getFreezer vrij totals match potjeFreeTotals", t.Robin === truth.robin && t.Amber === truth.amber && t.Samen === truth.samen, { t, truth });
+    check("getFreezer vrij totals are the fixture's (Robin 2, Amber 3, Samen 1)", t.Robin === 2 && t.Amber === 3 && t.Samen === 1, t);
+    const row = (n: string) => fz.potjes.perGerecht.find((g: any) => g.naam === n);
+    check("hamrol: Amber 1 free now, Samen-planned day listed", row("Chattest hamrol")?.Amber.vrij === 1 && row("Chattest hamrol")?.Amber.waarvanVrijNu === undefined && row("Chattest hamrol")?.Robin.ingepland?.length === 1, row("Chattest hamrol"));
+    check("pastinaak is free later, not now", row("Chattest pastinaak")?.Amber.vrij === 1 && row("Chattest pastinaak")?.Amber.waarvanNogTeKoken === 1 && !!row("Chattest pastinaak")?.Amber.vrijVanaf, row("Chattest pastinaak"));
+    check("fully planned potje is not free", row("Chattest vol")?.Robin.vrij === 0 && row("Chattest vol")?.Amber.vrij === 0 && row("Chattest vol")?.vrijVoorSamen === 0, row("Chattest vol"));
+    const names = (l: any[]) => l.map((c) => c.naam).sort().join(",");
+    check("kanInplannenOp Samen: only courgette", names(fz.kanInplannenOp.Samen) === "Chattest courgette", fz.kanInplannenOp);
+    check("kanInplannenOp Amber", names(fz.kanInplannenOp.Amber) === "Chattest courgette,Chattest hamrol,Chattest pastinaak", fz.kanInplannenOp.Amber);
+    check("kanInplannenOp Robin", names(fz.kanInplannenOp.Robin) === "Chattest courgette,Chattest quiche", fz.kanInplannenOp.Robin);
+
+    const sBefore = await state();
+    const bad = await post([{ op: "addPotjeMeal", date: D(21), who: "Samen", potje: "Chattest quiche" }]);
+    check("Samen quiche fails with the Amber reason", bad.ok === false && /Amber heeft geen potje “Chattest quiche”/.test(bad.error) && /kan: .*Chattest courgette/.test(bad.error), bad);
+    check("failed potje change rolled back", (await state()) === sBefore);
+
+    const any = await post([{ op: "addPotjeMeal", date: D(21), who: "Amber" }]);
+    check("Amber without name picks a potje", any.ok === true && /^Potje .+ gepland op/.test(any.summary), any);
+    const planned = (await db.from("plan_meals").select("freeform_title, from_freezer, assignee, day:plan_days!inner(day_date)").eq("day.day_date", D(21))).data as any[];
+    check("the random potje is a real Amber potje meal", planned.length === 1 && planned[0].from_freezer && planned[0].assignee === "amber", planned);
+    const ua2 = await undoReq(any.undoId);
+    check("undo random potje restores the snapshot", ua2.body.ok === true && (await state()) === sBefore, ua2);
+
+    const anyBoth = await post([{ op: "addPotjeMeal", date: D(21), who: "Samen", potje: "willekeurig" }]);
+    check("Samen 'willekeurig' picks the first Samen choice", anyBoth.ok === true, anyBoth);
+    if (anyBoth.undoId) await undoReq(anyBoth.undoId);
+
+    // cleanup: undo the fixture
+    check("undo potjes fixture", (await undoReq(fixture.undoId)).body.ok === true);
+    check("undo restores the exact state (potjes)", (await state()) === sG);
+  }
+
+  // h. setMealVleesjes (e2e 2026-11-08): replacing a line releases its reservation for good,
+  // "add" keeps existing lines, and the summary lists the full resulting list.
+  {
+    const sH = await state();
+    const fx = await post([
+      { op: "createRecipe", title: "Chattest bloemkool" },
+      { op: "addVleesje", name: "Chattest hamburger", count: 3 },
+      { op: "addVleesje", name: "Chattest krokante kip", count: 4 },
+      { op: "addMeal", date: D(22), who: "Samen", recipe: "Chattest bloemkool" },
+      { op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", mode: "replace", vleesjes: [{ name: "Chattest hamburger", count: 1, source: "diepvries" }, { name: "Chattest hamburger", count: 2, source: "kopen" }] },
+    ]);
+    check("vleesjes fixture applied", fx.ok === true, fx);
+    const held = async (name: string) => {
+      const v = (await db.from("vleesjes").select("id").eq("name", name)).data ?? [];
+      const r = (await db.from("freezer_reservations").select("amount").in("vleesje_id", v.map((x: any) => x.id)).is("settled_at", null)).data ?? [];
+      return r.reduce((a: number, x: any) => a + Number(x.amount), 0);
+    };
+    check("hamburger reserved 1", (await held("Chattest hamburger")) === 1);
+    const add = await post([{ op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", vleesjes: [{ name: "chattest krokante kip", count: 2, source: "diepvries" }] }]);
+    check("default mode adds to the existing lines", add.ok === true && (await held("Chattest hamburger")) === 1 && (await held("Chattest krokante kip")) === 2, add);
+    check("summary lists the full resulting list", /1 Chattest hamburger \(diepvries\), 2 Chattest hamburger \(kopen\), 2 Chattest krokante kip \(diepvries\)/.test(add.summary) && /Chattest bloemkool/.test(add.summary), add);
+    const rep = await post([{ op: "setMealVleesjes", date: D(22), meal: "Chattest bloemkool", mode: "replace", vleesjes: [{ name: "Chattest krokante kip", count: 2, source: "diepvries" }] }]);
+    check("replace releases the removed line's reservation", rep.ok === true && (await held("Chattest hamburger")) === 0 && (await held("Chattest krokante kip")) === 2, { rep, h: await held("Chattest hamburger") });
+    const ur = await undoReq(rep.undoId);
+    check("undo replace", ur.body.ok === true);
+    check("undo add", (await undoReq(add.undoId)).body.ok === true);
+
+    // setMealGroenten: names from the freezer resolve to the real entry ("prei" -> "Chattest prei 1P", unit stuk).
+    const gx = await post([{ op: "addGroente", name: "Chattest prei 1P", amount: 1, unit: "stuk" }]);
+    check("groente fixture", gx.ok === true, gx);
+    const g1 = await post([{ op: "setMealGroenten", date: D(22), meal: "Chattest bloemkool", groenten: [{ name: "chattest prei", amount: 1, unit: "portie" }] }]);
+    check("groente resolves name and unit to the freezer entry", g1.ok === true && /Chattest prei 1P/.test(g1.summary), g1);
+    const gr = (await db.from("freezer_reservations").select("amount, groente:groenten(name, unit)").not("groente_id", "is", null).is("settled_at", null)).data as any[];
+    check("groente reserved on the real entry", gr.some((r) => r.groente?.name === "Chattest prei 1P" && Number(r.amount) === 1), gr);
+    const g2 = await post([{ op: "setMealGroenten", date: D(22), meal: "Chattest bloemkool", groenten: [{ name: "Chattest spruitjes", amount: 1, unit: "stuk" }] }]);
+    check("unknown groente gives a clear error with what exists", g2.ok === false && /Chattest prei 1P/.test(g2.error), g2);
+    check("undo groente fixture", (await undoReq(g1.undoId)).body.ok === true && (await undoReq(gx.undoId)).body.ok === true);
+
+    check("undo vleesjes fixture", (await undoReq(fx.undoId)).body.ok === true);
+    check("undo restores the exact state (vleesjes)", (await state()) === sH);
+  }
+
+  // i. updateRecipe tags (e2e 2026-11-08: "voeg de tag salade toe" wiped 4 tags): addTags/removeTags keep the rest.
+  {
+    const sI = await state();
+    const fx = await post([
+      { op: "createTag", label: "Chattest a" },
+      { op: "createTag", label: "Chattest b" },
+      { op: "createTag", label: "Chattest c" },
+      { op: "createRecipe", title: "Chattest tags", tags: ["Chattest a", "Chattest b"] },
+    ]);
+    check("tags fixture applied", fx.ok === true, fx);
+    const tagsOf = async () => ((await db.from("recipes").select("tags").eq("title", "Chattest tags").maybeSingle()).data?.tags ?? []).slice().sort().join(",");
+    const add = await post([{ op: "updateRecipe", recipe: "Chattest tags", addTags: ["chattest C", "Chattest a"] }]);
+    check("addTags keeps the existing tags (case-insensitive, no duplicates)", add.ok === true && (await tagsOf()) === "chattest a,chattest b,chattest c", { add, tags: await tagsOf() });
+    check("summary states the resulting tags", /tags nu: Chattest a, Chattest b, Chattest c/.test(add.summary), add);
+    const rem = await post([{ op: "updateRecipe", recipe: "Chattest tags", removeTags: ["Chattest b"] }]);
+    check("removeTags removes only that tag", rem.ok === true && (await tagsOf()) === "chattest a,chattest c", { rem, tags: await tagsOf() });
+    const rep = await post([{ op: "updateRecipe", recipe: "Chattest tags", tags: ["Chattest b"] }]);
+    check("tags replaces the whole list", rep.ok === true && (await tagsOf()) === "chattest b", rep);
+    for (const x of [rep, rem, add, fx]) await undoReq(x.undoId);
+    check("undo restores the exact state (tags)", (await state()) === sI);
+  }
+
+  // j. getFreezer totals (e2e 2026-11-08: chat said 10 soorten vrij, the tab 9): explicit counts, same arithmetic as the tabs.
+  {
+    const { loadStock } = await import("../lib/freezer/stock-server");
+    const { entryStatus } = await import("../lib/freezer/stock");
+    const sJ = await state();
+    const fx = await post([
+      { op: "createRecipe", title: "Chattest vrij" },
+      { op: "addVleesje", name: "Chattest vrij a", count: 2 },
+      { op: "addVleesje", name: "Chattest vrij b", count: 3 },
+      { op: "addVleesje", name: "Chattest vrij c", count: 1 },
+      { op: "addGroente", name: "Chattest erwt", amount: 400, unit: "gram" },
+      { op: "addGroente", name: "Chattest bonen", amount: 2, unit: "stuk" },
+      { op: "addMeal", date: D(23), who: "Samen", recipe: "Chattest vrij" },
+      { op: "setMealVleesjes", date: D(23), meal: "Chattest vrij", vleesjes: [{ name: "Chattest vrij c", count: 1, source: "diepvries" }, { name: "Chattest vrij b", count: 1, source: "diepvries" }] },
+    ]);
+    check("totals fixture applied", fx.ok === true, fx);
+    const fz: any = await (dataTools.getFreezer as any).execute({ search: "chattest" }, {});
+    check("vleesjes: 2 soorten vrij, 4 stuks (a 2 + b 2)", fz.vleesjes.aantalSoortenVrij === 2 && fz.vleesjes.totaalVrij === 4, fz.vleesjes);
+    check("vrij lists only items with free > 0; fully planned apart", fz.vleesjes.vrij.map((v: any) => v.naam).join() === "Chattest vrij a,Chattest vrij b" && fz.vleesjes.volledigIngepland.map((v: any) => v.naam).join() === "Chattest vrij c", fz.vleesjes);
+    check("groenten: 2 soorten vrij, totaal per eenheid", fz.groenten.aantalSoortenVrij === 2 && fz.groenten.totaalVrij.gram === 400 && fz.groenten.totaalVrij.stuk === 2, fz.groenten);
+    const all: any = await (dataTools.getFreezer as any).execute({}, {});
+    const st = await loadStock(db, "vleesje");
+    const rows_ = st.entries.filter((e) => e.amount > 0).map((e) => ({ name: e.name.toLowerCase(), free: entryStatus(e, st.reservations).free }));
+    check("matches the Vleesjes tab (soorten and total free)", all.vleesjes.aantalSoortenVrij === new Set(rows_.filter((r) => r.free > 0).map((r) => r.name)).size && all.vleesjes.totaalVrij === rows_.reduce((a, r) => a + r.free, 0), { chat: [all.vleesjes.aantalSoortenVrij, all.vleesjes.totaalVrij], rows: rows_.length });
+    check("undo totals fixture", (await undoReq(fx.undoId)).body.ok === true && (await state()) === sJ);
+  }
 }

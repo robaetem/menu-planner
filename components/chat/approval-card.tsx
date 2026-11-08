@@ -24,15 +24,20 @@ type Props = {
   addToolResult: AddToolResult;
 };
 
+/** A failure the server explained ({ ok:false, error } with a non-200 status) is returned as data; anything else throws. */
 async function post(url: string, body?: unknown) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(String(res.status));
-  return (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok && typeof json.error !== "string") throw new Error(String(res.status));
+  return json;
 }
+
+const NETWORK_ERROR = "Er is geen verbinding met de app. Controleer je internet en probeer het opnieuw.";
+const SERVER_ERROR = "Er ging iets mis aan onze kant. Er is niets veranderd; probeer het straks opnieuw.";
 
 export function ApprovalCard({ tool, toolCallId, state, input, output, addToolResult }: Props) {
   const router = useRouter();
@@ -53,8 +58,8 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
       await addToolResult({ tool, toolCallId, output: res });
       // Show the change in the planning behind the chat right away.
       router.refresh();
-    } catch {
-      setError("Dat lukte niet. Probeer het straks opnieuw.");
+    } catch (e) {
+      setError(e instanceof TypeError ? NETWORK_ERROR : SERVER_ERROR);
     } finally {
       setBusy(false);
     }
@@ -69,11 +74,15 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
     setBusy(true);
     setError(null);
     try {
-      await post(`${APPLY_ROUTE}/${encodeURIComponent(output.undoId)}/undo`);
+      const r = await post(`${APPLY_ROUTE}/${encodeURIComponent(output.undoId)}/undo`);
+      if (r.ok === false) {
+        setError(typeof r.error === "string" ? r.error : "Ongedaan maken lukte niet.");
+        return;
+      }
       setUndone(true);
       router.refresh();
-    } catch {
-      setError("Ongedaan maken lukte niet.");
+    } catch (e) {
+      setError(e instanceof TypeError ? NETWORK_ERROR : "Ongedaan maken lukte niet.");
     } finally {
       setBusy(false);
     }
@@ -94,7 +103,7 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
       ) : declined ? (
         <p className="text-xs text-muted-foreground">Niet gedaan</p>
       ) : failed ? (
-        <p className="text-xs text-destructive">Dat lukte niet.</p>
+        <p className="text-xs text-destructive">{output?.error || "Dat lukte niet."}</p>
       ) : (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{undone ? "Ongedaan gemaakt" : "Gedaan"}</span>

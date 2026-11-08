@@ -10,6 +10,7 @@ import {
   availablePortions,
   nameKey,
   pickPortions,
+  potjeBlockReason,
   readyOn,
   type Portion,
   type Who,
@@ -81,8 +82,12 @@ function revalidateFreezer() {
  *  freezer itself only empties when the day comes. */
 export async function planPotje(dayDate: string, assignee: Assignee, name: string): Promise<void> {
   const db = getDb();
-  const picked = pickPortions(await listPortions(), name, dayDate, assignee, todayIso());
-  if (!picked) throw new Error(`Geen potje “${name}” beschikbaar op ${formatDayLabel(dayDate)}.`);
+  const portions = await listPortions();
+  const picked = pickPortions(portions, name, dayDate, assignee, todayIso());
+  if (!picked) {
+    const reason = potjeBlockReason(portions, name, dayDate, assignee, todayIso(), undefined, formatDayLabel);
+    throw new Error(reason ?? `Geen potje “${name}” beschikbaar op ${formatDayLabel(dayDate)}.`);
+  }
 
   const dayId = await ensureDay(db, dayDate);
   const d = dinersFor(assignee);

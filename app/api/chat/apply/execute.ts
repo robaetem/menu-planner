@@ -5,9 +5,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatDayLabel } from "@/lib/date";
 import type { Op } from "@/lib/chat/ops";
-import type { Assignee, IngredientRow } from "@/lib/types";
+import type { Assignee, IngredientRow, TemplateVleesje } from "@/lib/types";
 import { resolveTitle } from "@/app/(protected)/planning/config";
 import { normalizeRecipeImageUrl } from "@/lib/recipes/images";
+import { todayIso } from "@/lib/date";
+import { listPortions } from "@/lib/data";
+import { potjeBlockReason, potjeChoices, type Who } from "@/lib/freezer/potjes";
 import {
   assignRecipe,
   deleteMeal,
@@ -31,6 +34,8 @@ import { generateShoppingList, saveShoppingDoc } from "@/app/(protected)/boodsch
 import { revalidatePath } from "next/cache";
 
 const BOX: Record<string, Assignee> = { Samen: "both", Amber: "amber", Robin: "robin" };
+/** Words that mean "any potje will do". */
+const ANY_POTJE = new Set(["willekeurig", "random", "eender welk", "maakt niet uit", "maakt niet uit welk", "om het even", "gewoon een potje", "een potje"]);
 const WHO = { Amber: "amber", Robin: "robin" } as const;
 const norm = (s: unknown) =>
   String(s ?? "")
@@ -70,7 +75,38 @@ async function findMeal(db: SupabaseClient, date: string, meal: string, who?: st
   const hits = meals.filter((m) => norm(title(m)).includes(n) || norm(m.recipe?.title).includes(n) || n.includes(norm(m.recipe?.title ?? m.freeform_title ?? "~")));
   if (!hits.length) throw new Error(`Geen maaltijd “${meal}”${who ? ` voor ${who}` : ""} op ${formatDayLabel(date)}.`);
   if (hits.length > 1) throw new Error(`Op ${formatDayLabel(date)} zijn er meerdere maaltijden “${meal}”: zeg voor wie (Samen, Amber of Robin).`);
-  return { id: hits[0].id as string, assignee: hits[0].assignee as Assignee, title: title(hits[0]) };
+  const m = hits[0];
+  const baseTitle = resolveTitle(m.recipe?.title ?? m.freeform_title ?? m.raw_text ?? "", null);
+  return { id: m.id as string, assignee: m.assignee as Assignee, title: title(m), baseTitle, vleesjes: (m.template_vleesjes ?? []) as TemplateVleesje[] };
+}
+
+/** Freezer stock entries (kind: vleesjes or groenten with amount > 0), name and unit as the tabs show them. */
+async function stockEntries(db: SupabaseClient, table: "vleesjes" | "groenten"): Promise<{ name: string; unit: string }[]> {
+  const col = table === "vleesjes" ? "count" : "amount";
+  const all = await rows<any>(db.from(table).select(table === "vleesjes" ? "name, count" : "name, unit, amount"));
+  return all.filter((r) => Number(r[col]) > 0).map((r) => ({ name: String(r.name).trim(), unit: table === "vleesjes" ? "" : String(r.unit ?? "").trim() }));
+}
+
+/** The freezer entry a chat name means: exact name first, then the one entry containing it. */
+function stockName(entries: { name: string; unit: string }[], q: string, what: string): string {
+  const names = [...new Map(entries.map((e) => [norm(e.name), e.name])).values()];
+  const n = norm(q);
+  const exact = names.filter((x) => norm(x) === n);
+  const part = names.filter((x) => norm(x).includes(n) || (norm(x).length > 2 && n.includes(norm(x))));
+  const hit = exact.length ? exact : part;
+  if (hit.length === 1) return hit[0];
+  if (!hit.length) throw new Error(`${what} “${q}” staat niet in de diepvries. Er is: ${names.slice(0, 12).join(", ") || "niets"}.`);
+  throw new Error(`${what} “${q}” is niet eenduidig: ${hit.slice(0, 5).join(", ")}.`);
+}
+
+/** Groente name + unit as the freezer entry has them, so the reservation lands on the real batch. */
+function stockGroente(entries: { name: string; unit: string }[], name: string, unit: string): { name: string; unit: string } {
+  const real = stockName(entries, name, "Groente");
+  const units = [...new Set(entries.filter((e) => norm(e.name) === norm(real)).map((e) => e.unit))];
+  const same = units.find((u) => norm(u) === norm(unit));
+  if (same !== undefined) return { name: real, unit: same };
+  if (units.length === 1) return { name: real, unit: units[0] };
+  throw new Error(`${real} staat in de diepvries in ${units.join(" en ")}, niet in ${unit}. Kies een van die eenheden.`);
 }
 
 async function recipeByTitle(db: SupabaseClient, q: string) {
@@ -165,9 +201,31 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
       await assignRecipe(op.date, BOX[op.who], r.id);
       return `${r.title} gepland op ${formatDayLabel(op.date)} (${op.who})`;
     }
-    case "addPotjeMeal":
-      await planPotje(op.date, BOX[op.who], op.potje);
-      return `Potje ${op.potje} gepland op ${formatDayLabel(op.date)} (${op.who})`;
+    case "addPotjeMeal": {
+      const box = BOX[op.who];
+      const portions = await listPortions();
+      const today = todayIso();
+      const choices = potjeChoices(portions, op.date, box === "both" ? "both" : (box as Who), today);
+      const anyPotje = !op.potje || ANY_POTJE.has(norm(op.potje));
+      let name = op.potje ?? "";
+      if (anyPotje) {
+        // Choices are sorted: dishes already in the freezer first.
+        if (!choices.length) throw new Error(`Er is geen vrij potje voor ${op.who} op ${formatDayLabel(op.date)}.`);
+        name = choices[0].name;
+      } else {
+        // "hamrolletjes" for "Hamrolletjes met witloof": take the one free dish that contains it.
+        const part = choices.filter((c) => norm(c.name).includes(norm(name)));
+        if (!choices.some((c) => norm(c.name) === norm(name)) && part.length === 1) name = part[0].name;
+        const reason = potjeBlockReason(portions, name, op.date, box === "both" ? "both" : (box as Who), today, undefined, formatDayLabel);
+        if (reason) {
+          const fits = choices.map((c) => c.name).slice(0, 5);
+          throw new Error(`${reason}${fits.length ? ` Voor ${op.who} op ${formatDayLabel(op.date)} kan: ${fits.join(", ")}.` : ` Voor ${op.who} op ${formatDayLabel(op.date)} is er geen vrij potje.`}`);
+        }
+        name = choices.find((c) => norm(c.name) === norm(name))?.name ?? name;
+      }
+      await planPotje(op.date, box, name);
+      return `Potje ${name} gepland op ${formatDayLabel(op.date)} (${op.who})`;
+    }
     case "moveMeal": {
       const m = await findMeal(db, op.date, op.meal, op.who);
       await moveMeal(m.id, op.toDate, op.toWho ? BOX[op.toWho] : m.assignee);
@@ -175,13 +233,33 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
     }
     case "setMealVleesjes": {
       const m = await findMeal(db, op.date, op.meal, op.who);
-      await setMealVleesjes(m.id, op.vleesjes.map((v) => ({ name: v.name, count: v.count, source: v.source === "kopen" ? "buy" : "freezer" })));
-      return `Vleesjes bij ${m.title}: ${op.vleesjes.map((v) => `${v.count} ${v.name} (${v.source})`).join(", ") || "geen"}`;
+      // Freezer lines name a real freezer entry ("kip" -> "Krokante kip"); buy lines are free text.
+      const entries = op.vleesjes.some((v) => v.source === "diepvries") ? await stockEntries(db, "vleesjes") : [];
+      const asked: TemplateVleesje[] = op.vleesjes.map((v) => ({
+        name: v.source === "diepvries" ? stockName(entries, v.name, "Vleesje") : v.name.trim(),
+        count: v.count,
+        source: v.source === "kopen" ? "buy" : "freezer",
+      }));
+      // Default "add": keep what the meal already has; the same vleesje and source adds up.
+      const lines: TemplateVleesje[] = op.mode === "replace" ? [] : m.vleesjes.map((v) => ({ ...v }));
+      for (const a of asked) {
+        const same = lines.find((l) => norm(l.name) === norm(a.name) && l.source === a.source);
+        if (same) same.count = Math.min(99, same.count + a.count);
+        else lines.push(a);
+      }
+      await setMealVleesjes(m.id, lines);
+      const list = lines.map((v) => `${v.count} ${v.name} (${v.source === "buy" ? "kopen" : "diepvries"})`).join(", ") || "geen";
+      return `${m.baseTitle} ${formatDayLabel(op.date)}: ${list}`;
     }
     case "setMealGroenten": {
       const m = await findMeal(db, op.date, op.meal, op.who);
-      await setMealGroenten(m.id, op.groenten.map((g) => ({ name: g.name, unit: g.unit, amount: g.amount, replaces: g.replaces ?? null })));
-      return `Diepvriesgroenten bij ${m.title}: ${op.groenten.map((g) => `${g.amount} ${g.unit} ${g.name}`).join(", ") || "geen"}`;
+      const entries = op.groenten.length ? await stockEntries(db, "groenten") : [];
+      const lines = op.groenten.map((g) => {
+        const real = stockGroente(entries, g.name, g.unit);
+        return { name: real.name, unit: real.unit, amount: g.amount, replaces: g.replaces ?? null };
+      });
+      await setMealGroenten(m.id, lines);
+      return `Diepvriesgroenten bij ${m.baseTitle}: ${lines.map((g) => `${g.amount} ${g.unit} ${g.name}`).join(", ") || "geen"}`;
     }
     case "setExtraPotjes": {
       const m = await findMeal(db, op.date, op.meal, op.who);
@@ -270,16 +348,27 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
         ingredients = ingredients.map((i) => (i === hit ? next : i));
       }
       for (const a of op.addIngredients ?? []) ingredients.push(ingredientRow(a, ingredients.length));
+      // addTags / removeTags change the existing list; `tags` replaces it.
+      let tags: string[] = op.tags ? await tagValues(db, op.tags) : [...(r.tags ?? [])];
+      for (const t of await tagValues(db, op.addTags ?? [])) if (!tags.some((x) => norm(x) === norm(t))) tags.push(t);
+      const gone = (await tagValues(db, op.removeTags ?? [])).map(norm);
+      tags = tags.filter((t) => !gone.includes(norm(t)));
       const input: RecipeInput = {
         title: op.title ?? r.title,
-        tags: op.tags ? await tagValues(db, op.tags) : r.tags,
+        tags,
         method: op.method !== undefined ? op.method.trim() || null : r.method,
         notes: op.notes !== undefined ? op.notes.trim() || null : r.notes,
         has_vleesje: op.hasVleesje ?? r.has_vleesje,
         ingredients: ingredients.map((i, k) => ({ ...i, sort: k })),
       };
       await updateRecipe(r.id, input);
-      return `Recept ${r.title} aangepast`;
+      let line = `Recept ${r.title} aangepast`;
+      if (op.tags || op.addTags || op.removeTags) {
+        const labels = await rows<any>(db.from("recipe_tags").select("value, label"));
+        const names = tags.map((t) => labels.find((l) => norm(l.value) === norm(t))?.label ?? t);
+        line += `, tags nu: ${names.join(", ") || "geen"}`;
+      }
+      return line;
     }
     case "deleteRecipe": {
       // Not the screen's deleteRecipe: that also removes the photo file, which
