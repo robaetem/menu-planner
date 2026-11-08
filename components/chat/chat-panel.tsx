@@ -377,7 +377,7 @@ export function ChatPanel({
             <Button
               type="button"
               size="icon"
-              className="size-8 rounded-full"
+              className="size-8 rounded-full bg-destructive text-white hover:bg-destructive/90"
               data-chat-send
               aria-label="Verstuur"
               disabled={busy || (!input.trim() && !images.length)}
