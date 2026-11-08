@@ -42,7 +42,8 @@ The card in the chat shows the real state: "Bezig: code aanpassen…", "Bezig: c
 | agent sandbox image | `menu-agent:1`, built from `scripts/live/agent.Dockerfile` |
 | app job | `hub-job start menu-live-app --cwd /home/robin/menu-live/live -- scripts/live/app.sh 3400` |
 | worker job | `hub-job start menu-live-worker --cwd /home/robin/menu-live -- ./worker-run.sh` (secrets from `worker.env` and `.openrouter-key`, mode 600) |
-| public URL | Tailscale Funnel `https://caspian-devbox.tail9383e8.ts.net:10000/` -> `127.0.0.1:3400` |
+| compression proxy | `hub-job start menu-live-proxy --cwd /home/robin/menu-live/proxy -- docker run --rm --name menu-live-proxy --network host -v $PWD/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2` (`scripts/live/Caddyfile`: gzip/zstd, 5x less JS than raw `next dev`) |
+| public URL | Tailscale Funnel `https://caspian-devbox.tail9383e8.ts.net:10000/` -> Caddy `127.0.0.1:3402` -> `127.0.0.1:3400` |
 
 Both jobs restart their process in a loop; the worker also restarts the app after three failed
 health checks. After a devbox reboot start both jobs again.
