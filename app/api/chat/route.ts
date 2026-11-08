@@ -42,7 +42,14 @@ export async function POST(req: Request) {
   return result.toUIMessageStreamResponse();
 }
 
-type Part = { type: string; output?: { runId?: string; status?: string } };
+const MEANING: Record<string, string> = {
+  live: "staat in de app",
+  undone: "ongedaan gemaakt: de app is weer zoals ervoor, dit staat NIET meer in de app",
+  failed: "mislukt: niets veranderd",
+  blocked: "geblokkeerd: niets veranderd",
+};
+
+type Part = { type: string; output?: { runId?: string; status?: string; meaning?: string } };
 
 /** Earlier request_change results carry only a runId; add what became of each run
  *  (live, undone, failed...) so the model never treats an undone change as pending. */
@@ -56,7 +63,7 @@ async function withChangeStatus(messages: UIMessage[]): Promise<UIMessage[]> {
     ...m,
     parts: (m.parts as Part[]).map((p) =>
       p.type === "tool-request_change" && p.output?.runId && status.has(p.output.runId)
-        ? { ...p, output: { ...p.output, status: status.get(p.output.runId) } }
+        ? { ...p, output: { ...p.output, status: status.get(p.output.runId), meaning: MEANING[status.get(p.output.runId)!] } }
         : p,
     ) as UIMessage["parts"],
   }));
