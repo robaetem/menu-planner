@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, Snowflake, ChefHat } from "lucide-react";
+import { Plus, Snowflake, ChefHat, Carrot } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,10 +19,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { Assignee } from "@/lib/types";
 import { formatDayShort } from "@/lib/date";
+import { formatGroenteQuantity, normalizeGroenteUnit } from "@/lib/freezer/inventory";
 import { blockedPotjes, potjeChoices, type BlockedPotje, type PotjeChoice } from "@/lib/freezer/potjes";
-import { planPotje } from "./actions";
+import { planGroente, planPotje } from "./actions";
 import { assigneeLabel } from "./config";
 import { useFreezer } from "./freezer-context";
+import { stepFor, useStockOptions, type StockOption } from "./stock-picker";
 
 export function AddMealButton({
   dayDate,
@@ -35,7 +37,7 @@ export function AddMealButton({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const { portions, today } = useFreezer();
+  const { portions, today, groenten } = useFreezer();
   // Everything cooked BEFORE this day and not planned elsewhere — including
   // potjes that are only going to be made later this week.
   const choices = potjeChoices(portions, dayDate, who, today);
@@ -44,11 +46,25 @@ export function AddMealButton({
   // Never let a potje silently vanish: what can't be picked for this day is
   // listed struck through, with why.
   const blocked = blockedPotjes(portions, dayDate, who, today);
+  // Same for vegetables: what the freezer (tab Groenten) still has free.
+  const groenteOptions = useStockOptions(groenten, null).filter((o) => o.free > 0);
 
   function pickPotje(c: PotjeChoice) {
     start(async () => {
       try {
         await planPotje(dayDate, who, c.name);
+        router.refresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Toevoegen mislukt.");
+        console.error(e);
+      }
+    });
+  }
+
+  function pickGroente(o: StockOption) {
+    start(async () => {
+      try {
+        await planGroente(dayDate, who, o.name, o.unit, Math.min(stepFor(o.unit), o.free));
         router.refresh();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Toevoegen mislukt.");
@@ -132,6 +148,24 @@ export function AddMealButton({
                   </Fragment>
                 ),
             )}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Carrot className="size-4 text-emerald-600" /> Groente diepvries
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-2rem)]">
+            {groenteOptions.length === 0 && (
+              <DropdownMenuItem disabled>Geen groenten in de diepvries</DropdownMenuItem>
+            )}
+            {groenteOptions.map((o) => (
+              <DropdownMenuItem key={o.key} onClick={() => pickGroente(o)}>
+                <span className="min-w-0 flex-1 truncate">{o.name}</span>
+                <span className="pl-3 text-xs text-muted-foreground tabular-nums">
+                  {formatGroenteQuantity(o.free, normalizeGroenteUnit(o.unit))}
+                </span>
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuItem onClick={gerecht}>

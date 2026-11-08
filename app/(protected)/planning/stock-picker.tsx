@@ -35,6 +35,11 @@ export function findOption(options: StockOption[], name: string, unit = ""): Sto
   return options.find((o) => o.key === k);
 }
 
+/** One click adds this much (in the entry's unit). */
+export function stepFor(unit: string): number {
+  return unit === "gram" ? 100 : unit === "kilogram" ? 0.5 : 1;
+}
+
 export function StockChips({
   options,
   selectedOf,

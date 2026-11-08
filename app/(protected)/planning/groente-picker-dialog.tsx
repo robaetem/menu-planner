@@ -19,14 +19,9 @@ import { formatGroenteQuantity, normalizeGroenteUnit } from "@/lib/freezer/inven
 import { guessReplacedIngredient, round3, stockKey } from "@/lib/freezer/stock";
 import { setMealGroenten } from "./actions";
 import { useFreezer } from "./freezer-context";
-import { ChosenLine, findOption, leftOf, StockChips, useStockOptions, type StockOption } from "./stock-picker";
+import { ChosenLine, findOption, leftOf, stepFor, StockChips, useStockOptions, type StockOption } from "./stock-picker";
 
 const NOTHING = "__niets__";
-
-/** One click adds this much (in the entry's unit). */
-function stepFor(unit: string): number {
-  return unit === "gram" ? 100 : unit === "kilogram" ? 0.5 : 1;
-}
 
 function qty(amount: number, unit: string): string {
   return formatGroenteQuantity(amount, normalizeGroenteUnit(unit));
