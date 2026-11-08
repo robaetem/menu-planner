@@ -330,7 +330,18 @@ async function publishChange(r: Run) {
   const url = pr.out.match(/https:\/\/github\.com\/\S+\/pull\/(\d+)/);
   if (!url) return log({ run: r.id, prFailed: pr.out.slice(-300) });
   set(r, { prUrl: url[0], prNumber: Number(url[1]) });
-  await gh("pr", "merge", "-R", CONFIG.repo, url[0], "--auto", "--squash");
+  await armAutoMerge(r, url[0]);
+}
+
+/** Right after `pr create` GitHub may not know yet whether the PR can merge; retry a few times. */
+async function armAutoMerge(r: Run, url: string) {
+  for (let i = 0; i < 4; i++) {
+    const m = await gh("pr", "merge", "-R", CONFIG.repo, url, "--auto", "--squash");
+    const on = await gh("pr", "view", "-R", CONFIG.repo, url, "--json", "autoMergeRequest,state", "--jq", '.state + " " + (.autoMergeRequest != null | tostring)');
+    if (/MERGED| true/.test(on.out)) return;
+    if (i === 3) return log({ run: r.id, autoMergeFailed: url, out: m.out.slice(-300) });
+    await new Promise((res) => setTimeout(res, 5_000));
+  }
 }
 
 // ---------- undo ----------
@@ -359,15 +370,27 @@ async function publishUndo(r: Run) {
     return;
   }
   if (st.out.trim() !== "MERGED") return;
+  // The change reached main as a squash commit, not as r.sha: revert that commit on top of main,
+  // else the revert PR has an empty diff and Vercel keeps the change.
+  const squash = (await gh("pr", "view", "-R", CONFIG.repo, String(r.prNumber), "--json", "mergeCommit", "--jq", ".mergeCommit.oid")).out.trim();
+  let commit: string;
+  try {
+    await git(CONFIG.liveDir, "fetch", "-q", "origin", "main");
+    const main = await git(CONFIG.liveDir, "rev-parse", "origin/main");
+    const tree = (await git(CONFIG.liveDir, "merge-tree", "--write-tree", `--merge-base=${squash}`, main, `${squash}^`)).split("\n")[0];
+    commit = await git(CONFIG.liveDir, "-c", "user.name=menu-planner-bot", "-c", "user.email=menu-planner-bot@users.noreply.github.com",
+      "commit-tree", tree, "-p", main, "-m", `Ongedaan: ${(r.summary ?? r.id).slice(0, 55)} (#${r.prNumber})`);
+  } catch (e) {
+    return log({ run: r.id, revertFailed: String(e).slice(-300) });
+  }
   const branch = `revert/${r.id}`;
-  const p = await gitPush(CONFIG.liveDir, "-q", "-f", "origin", `${r.revertSha}:refs/heads/${branch}`);
+  const p = await gitPush(CONFIG.liveDir, "-q", "-f", "origin", `${commit}:refs/heads/${branch}`);
   if (p.code !== 0) return log({ run: r.id, pushFailed: p.out.slice(-300) });
   const pr = await gh("pr", "create", "-R", CONFIG.repo, "--base", "main", "--head", branch, "--title", `Ongedaan: ${(r.summary ?? r.id).slice(0, 55)}`, "--body", `Draait #${r.prNumber} terug (ongedaan gemaakt in de live app).`);
   const url = pr.out.match(/https:\/\/github\.com\/\S+\/pull\/\d+/);
-  if (url) {
-    set(r, { revertPrUrl: url[0] });
-    await gh("pr", "merge", "-R", CONFIG.repo, url[0], "--auto", "--squash");
-  }
+  if (!url) return log({ run: r.id, prFailed: pr.out.slice(-300) });
+  set(r, { revertPrUrl: url[0] });
+  await armAutoMerge(r, url[0]);
 }
 
 // ---------- sync with main ----------
