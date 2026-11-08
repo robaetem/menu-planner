@@ -2,8 +2,11 @@
 
 import * as React from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from "ai";
-import { ArrowUp, ChevronRight, Sparkles, Trash2, X } from "lucide-react";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai";
+import { ArrowUp, ChevronRight, ImagePlus, Sparkles, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { compressImage } from "@/lib/image-compress";
+import { MAX_IMAGES, stripOldImages } from "@/lib/chat/images";
 import { Button } from "@/components/ui/button";
 import {
   ChatContainerContent,
@@ -48,7 +51,20 @@ function lastHasAnswer(messages: UIMessage[]) {
   );
 }
 
-const transport = new DefaultChatTransport({ api: "/api/chat" });
+// Only the last user message keeps its photos on the wire; older ones become "[foto]".
+const transport = new DefaultChatTransport({
+  api: "/api/chat",
+  prepareSendMessagesRequest: ({ messages, body }) => ({ body: { ...body, messages: stripOldImages(messages) } }),
+});
+
+/** Never persist photo data URLs in localStorage. */
+function withoutImages(messages: UIMessage[]): UIMessage[] {
+  return messages.map((m) =>
+    m.parts.some((p) => p.type === "file")
+      ? { ...m, parts: m.parts.map((p) => (p.type === "file" ? { type: "text" as const, text: "[foto]" } : p)) }
+      : m,
+  );
+}
 
 function ToolPart({
   part,
@@ -106,7 +122,12 @@ function renderParts(m: UIMessage, addToolResult: AddToolResult) {
       return;
     }
     flush(i);
-    if (part.type === "text") {
+    if (part.type === "file" && part.mediaType.startsWith("image/")) {
+      out.push(
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={i} src={part.url} alt="Foto" className="max-h-48 max-w-full rounded-2xl object-cover" />,
+      );
+    } else if (part.type === "text") {
       if (!part.text) return;
       out.push(
         m.role === "user" ? (
@@ -167,19 +188,38 @@ export function ChatPanel({
   React.useEffect(() => {
     if (!loaded || status === "streaming" || status === "submitted") return;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-60)));
+      localStorage.setItem(storageKey, JSON.stringify(withoutImages(messages.slice(-60))));
     } catch {
       /* storage full: ignore */
     }
   }, [messages, status, storageKey, loaded]);
 
   const busy = status === "submitted" || status === "streaming";
+  const [images, setImages] = React.useState<string[]>([]);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  async function addFiles(list: File[]) {
+    const files = list.filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    const room = MAX_IMAGES - images.length;
+    if (files.length > room) toast.error("Maximaal 3 foto's per bericht");
+    for (const f of files.slice(0, Math.max(room, 0))) {
+      try {
+        const url = await compressImage(f);
+        setImages((cur) => (cur.length < MAX_IMAGES ? [...cur, url] : cur));
+      } catch {
+        toast.error("Deze foto kan ik niet openen");
+      }
+    }
+  }
 
   function send(text: string) {
     const t = text.trim();
-    if (!t || busy) return;
-    sendMessage({ text: t });
+    if ((!t && !images.length) || busy) return;
+    const files: FileUIPart[] = images.map((url) => ({ type: "file", mediaType: "image/jpeg", url }));
+    sendMessage(files.length ? { text: t, files } : { text: t });
     setInput("");
+    setImages([]);
   }
 
   return (
@@ -273,8 +313,32 @@ export function ChatPanel({
           onSubmit={() => send(input)}
           className="rounded-2xl"
         >
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-2 pt-2">
+              {images.map((url, i) => (
+                <div key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="Gekozen foto" className="size-16 rounded-lg object-cover" />
+                  <button
+                    type="button"
+                    aria-label="Foto verwijderen"
+                    className="absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full bg-foreground text-background"
+                    onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <PromptInputTextarea
             submitOnEnter={false}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+              if (!files.length) return;
+              e.preventDefault();
+              void addFiles(files);
+            }}
             onKeyDown={(e) => {
               // Desktop: Enter sends, Shift+Enter is a newline. Touch / small screens: Enter is a newline.
               if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
@@ -282,14 +346,36 @@ export function ChatPanel({
               e.preventDefault();
               send(input);
             }} className="text-base md:text-sm" placeholder="Stel een vraag of vraag een aanpassing…" />
-          <PromptInputActions className="justify-end pt-1">
+          <PromptInputActions className="justify-between pt-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                void addFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-full"
+              aria-label="Foto toevoegen"
+              disabled={busy || images.length >= MAX_IMAGES}
+              onClick={() => fileRef.current?.click()}
+            >
+              <ImagePlus className="size-4" />
+            </Button>
             <Button
               type="button"
               size="icon"
               className="size-8 rounded-full"
               data-chat-send
               aria-label="Verstuur"
-              disabled={busy || !input.trim()}
+              disabled={busy || (!input.trim() && !images.length)}
               onClick={() => send(input)}
             >
               <ArrowUp className="size-4" />
