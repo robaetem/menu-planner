@@ -22,10 +22,13 @@ export function isVleesjeTemplate(recipe: { has_vleesje?: boolean; title?: strin
   return !!recipe && (!!recipe.has_vleesje || hasVleesjeToken(recipe.title));
 }
 
-/** A meal planned straight from the freezer (a "Potje diepvries" or a freezer
- *  vegetable) has no recipe but can still carry a vleesje from the freezer. */
-export function canPickVleesje(meal: { recipe_id?: string | null } | null | undefined): boolean {
-  return !!meal && !meal.recipe_id;
+/** A free-text meal has no recipe but can still carry a vleesje from the
+ *  freezer. A meal eaten straight from the freezer ("Potje diepvries") never
+ *  does. */
+export function canPickVleesje(
+  meal: { recipe_id?: string | null; from_freezer?: boolean } | null | undefined,
+): boolean {
+  return !!meal && !meal.from_freezer && !meal.recipe_id;
 }
 
 /** "2 hamburger + 1 worst" from the chosen template vleesjes. */
