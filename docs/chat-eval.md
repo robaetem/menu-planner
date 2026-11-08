@@ -23,7 +23,7 @@ Speed came from reasoning effort "low", a fixed fast provider order, and the app
 - "wat eten we donderdag?" → "Donderdag: pasta scampi, potje."
 - "wat moet ik kopen?" → "11 dingen. Bv. aardappelen, bloemkool, courgette, prei, gehakt."
 - "hoeveel potjes hebben we nog?" → "6 vrij: 3 voor Robin, 3 voor Amber."
-- "maak de verzendknop rood" → "Zal ik de verzendknop rood maken?", then on "ja": "Komt eraan, duurt een paar minuten."
+- "maak de verzendknop rood" → calls request_change at once with "Komt eraan, even geduld."
 
 ## Open issues
 

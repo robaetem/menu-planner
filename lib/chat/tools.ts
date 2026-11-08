@@ -10,8 +10,8 @@ import { ProposeChangeInput, ProposeChangeOutput } from "./ops";
  *  PROPOSED: proposeChange has no execute, so the AI SDK hands it to the
  *  client, which shows a "Doen / Niet doen" card and, after Doen, calls
  *  POST /api/chat/apply (journaled, undoable). The only side effect here is
- *  request_change, which queues an app-code change through lib/change after
- *  the user said yes in the conversation. */
+ *  request_change, which queues an app-code change through lib/change as soon as
+ *  the user asks for it (no confirmation question; the run card's undo is the safety net). */
 export function buildChatTools(email: string, opts: { images?: string[] } = {}) {
   return {
     ...dataTools,
@@ -25,7 +25,7 @@ export function buildChatTools(email: string, opts: { images?: string[] } = {}) 
     }),
     request_change: tool({
       description:
-        "Vraag een wijziging aan de APP (uiterlijk, gedrag, tekst) aan. Alleen aanroepen nadat de gebruiker in dit gesprek expliciet ja heeft gezegd op 'Zal ik dit aanpassen?'. NOOIT voor het wijzigen of verwijderen van gegevens (recepten, planning, diepvries, boodschappen): daarvoor is proposeChange.",
+        "Vraag een wijziging aan de APP (uiterlijk, gedrag, tekst) aan. Meteen aanroepen zodra de gebruiker om een aanpassing van de app vraagt, zonder eerst te vragen of je het mag; de kaart met 'Ongedaan maken' is het vangnet. Vraag alleen iets (één korte vraag) als echt onduidelijk is wat ze wil. Schrijf vóór de aanroep één korte regel (bv. 'Komt eraan, even geduld.'), erna niets meer. NOOIT voor het wijzigen of verwijderen van gegevens (recepten, planning, diepvries, boodschappen): daarvoor is proposeChange.",
       inputSchema: z.object({
         request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands."),
       }),
