@@ -44,8 +44,12 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [undone, setUndone] = React.useState(false);
+  // The apply response, kept here too: if the chat state does not take the answer, the card still
+  // shows "Gedaan" with "Ongedaan maken" instead of staying on "Doen" (a second click would apply twice).
+  const [applied, setApplied] = React.useState<typeof output>(undefined);
   const title = input?.title ?? "Wijziging";
-  const answered = state === "output-available";
+  output = state === "output-available" ? output : applied;
+  const answered = state === "output-available" || !!applied;
   const declined = answered && output?.declined === true;
   const failed = answered && !!output?.error;
   const done = answered && !declined && !failed;
@@ -55,6 +59,7 @@ export function ApprovalCard({ tool, toolCallId, state, input, output, addToolRe
     setError(null);
     try {
       const res = await post(APPLY_ROUTE, { ops: input?.ops ?? [] });
+      setApplied(res);
       await addToolResult({ tool, toolCallId, output: res });
       // Show the change in the planning behind the chat right away.
       router.refresh();
