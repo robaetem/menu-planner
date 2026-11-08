@@ -23,22 +23,25 @@ type RunInfo = {
   reason?: string;
   prUrl?: string;
   canUndo: boolean;
+  live?: boolean;
+  step?: string;
+  timings?: { totalMs?: number; undoMs?: number };
 };
 
 const LABELS: Record<RunStatus, string> = {
-  queued: "In de wachtrij",
-  running: "Code aanpassen",
-  checking: "Controleren",
-  deploying: "Live zetten",
-  live: "Live ✓",
-  undoing: "Ongedaan maken…",
+  queued: "Bezig: in de wachtrij…",
+  running: "Bezig: code aanpassen…",
+  checking: "Bezig: controleren…",
+  deploying: "Bezig: online zetten…",
+  live: "Staat erin",
+  undoing: "Bezig met ongedaan maken…",
   blocked: "Geblokkeerd",
   failed: "Mislukt",
   undone: "Ongedaan gemaakt",
 };
 
 const FINAL: RunStatus[] = ["live", "blocked", "failed", "undone"];
-const POLL_MS = 4000;
+const secs = (ms?: number) => (ms == null ? "" : ` in ${Math.max(1, Math.round(ms / 1000))} s`);
 
 export function ChangeRunCard({ runId }: { runId: string }) {
   const [info, setInfo] = React.useState<RunInfo | null>(null);
@@ -48,6 +51,8 @@ export function ChangeRunCard({ runId }: { runId: string }) {
   const [undoing, setUndoing] = React.useState(false);
   // Bumped after an undo so polling restarts even if the last status was final.
   const [pollKey, setPollKey] = React.useState(0);
+  const [elapsed, setElapsed] = React.useState(0);
+  const liveRef = React.useRef(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -66,6 +71,7 @@ export function ChangeRunCard({ runId }: { runId: string }) {
         const data = (await res.json()) as RunInfo;
         if (cancelled) return;
         setInfo(data);
+        liveRef.current = !!data.live;
         setError(false);
         failures = 0;
         if (FINAL.includes(data.status) && !undoing) return;
@@ -75,7 +81,7 @@ export function ChangeRunCard({ runId }: { runId: string }) {
         // Give up after a few failures; the card then says so and a reload retries.
         if (++failures >= 3) return;
       }
-      timer = setTimeout(poll, POLL_MS);
+      timer = setTimeout(poll, liveRef.current ? 1000 : 4000);
     }
     poll();
     return () => {
@@ -83,6 +89,14 @@ export function ChangeRunCard({ runId }: { runId: string }) {
       if (timer) clearTimeout(timer);
     };
   }, [runId, pollKey, undoing]);
+
+  const mountedAt = React.useRef(Date.now());
+  const busyNow = !info || !FINAL.includes(info.status);
+  React.useEffect(() => {
+    if (!busyNow) return;
+    const i = setInterval(() => setElapsed(Math.round((Date.now() - mountedAt.current) / 1000)), 1000);
+    return () => clearInterval(i);
+  }, [busyNow]);
 
   async function undo() {
     setUndoing(true);
@@ -97,7 +111,7 @@ export function ChangeRunCard({ runId }: { runId: string }) {
 
   if (gone) return null;
   const status = info?.status ?? "queued";
-  const label = info ? LABELS[status] : error ? "Status ophalen lukt even niet…" : "Status ophalen…";
+  const label = info ? (info.step && ["queued", "running", "checking", "deploying"].includes(status) ? `Bezig: ${info.step.toLowerCase()}…` : LABELS[status]) : error ? "Status ophalen lukt even niet…" : "Status ophalen…";
   const busy = !FINAL.includes(status);
   const bad = status === "blocked" || status === "failed";
   // A refused or failed run: prefer the agent's own short summary over the generic reason.
@@ -121,12 +135,17 @@ export function ChangeRunCard({ runId }: { runId: string }) {
         ) : (
           <Undo2 className="size-4 text-muted-foreground" />
         )}
-        <span>{label}</span>
+        <span>
+          {label}
+          {busy && elapsed > 0 ? ` · ${elapsed} s` : ""}
+          {status === "live" ? secs(info?.timings?.totalMs) : ""}
+          {status === "undone" ? secs(info?.timings?.undoMs) : ""}
+        </span>
       </div>
       {detail && <p className="mt-1.5 text-muted-foreground">{detail}</p>}
       {(info?.canUndo || status === "live" || info?.prUrl) && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {status === "live" && (
+          {status === "live" && !info?.live && (
             <Button size="sm" onClick={() => window.location.reload()}>
               <RotateCw className="size-3.5" />
               Ververs om te zien
@@ -135,7 +154,7 @@ export function ChangeRunCard({ runId }: { runId: string }) {
           {info?.canUndo && (
             <Button size="sm" variant="outline" onClick={undo} disabled={undoing}>
               <Undo2 className="size-3.5" />
-              Maak ongedaan
+              Ongedaan maken
             </Button>
           )}
           {info?.prUrl && (

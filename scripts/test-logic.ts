@@ -1,5 +1,6 @@
 /* Sanity checks for the core logic against the design worked-example.
    Run: corepack pnpm dlx tsx scripts/test-logic.ts  */
+import { imageError, latestImages, stripOldImages } from "../lib/chat/images";
 import { parseIngredientsText, toIngredientRows, serializeIngredient } from "../lib/recipes/ingredient-parser";
 import { serializePlannedIngredient } from "../lib/planning/ingredient-quantity";
 import { computeShoppingList, formatQuantity } from "../lib/planning/shopping";
@@ -564,6 +565,21 @@ eq("ranker: 'vriezer' -> Stoofvlees first", r3[0].title, "Stoofvlees");
     byRecipe,
   );
   eq("shopping: only that meal's share is left off", formatQuantity(other.all.find((l) => l.name === "Witte kool")!), "1 stuk");
+}
+
+{
+  const img = (n: string) => ({ type: "file", mediaType: "image/jpeg", url: `data:image/jpeg;base64,${n}` });
+  const msgs = [
+    { id: "1", role: "user", parts: [img("AAAA"), { type: "text", text: "a" }] },
+    { id: "2", role: "assistant", parts: [{ type: "text", text: "x" }] },
+    { id: "3", role: "user", parts: [img("BBBB")] },
+  ] as any;
+  const out = stripOldImages(msgs);
+  eq("images: old photo becomes [foto]", out[0].parts[0], { type: "text", text: "[foto]" });
+  eq("images: last user keeps photo", out[2].parts[0].type, "file");
+  eq("images: latestImages", latestImages(msgs), ["data:image/jpeg;base64,BBBB"]);
+  eq("images: rejects non-image url", imageError([{ id: "z", role: "user", parts: [{ type: "file", mediaType: "x", url: "https://e.com/a.jpg" }] }] as any) !== null, true);
+  eq("images: accepts jpeg", imageError([msgs[2]]), null);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);

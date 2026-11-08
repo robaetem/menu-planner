@@ -11,7 +11,9 @@ minutes, so be careful and small.
 - Match the existing style: look at neighbouring files, components in `components/` and helpers in `lib/` first, and reuse them.
 - Keep the change working on a phone screen.
 - If the request is unclear, unsafe or too big, make no change at all and say why in one line. An empty change is fine.
-- Before you finish, run `pnpm lint` and fix what you broke. Do not run `pnpm build` or start servers; the pipeline does that.
+- If you have a shell, run `pnpm lint` before you finish and fix what you broke. Without a shell the pipeline runs lint and a type check
+  and sends you the errors. Never run `pnpm build` or start servers.
+- Your change shows in the app within seconds. Work fast: open only the files you need, make the edit, stop.
 
 ## Never
 

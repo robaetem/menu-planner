@@ -12,7 +12,7 @@ import { ProposeChangeInput, ProposeChangeOutput } from "./ops";
  *  POST /api/chat/apply (journaled, undoable). The only side effect here is
  *  request_change, which queues an app-code change through lib/change after
  *  the user said yes in the conversation. */
-export function buildChatTools(email: string) {
+export function buildChatTools(email: string, opts: { images?: string[] } = {}) {
   return {
     ...dataTools,
     ...appGuideTools,
@@ -30,7 +30,7 @@ export function buildChatTools(email: string) {
         request: z.string().min(10).max(2000).describe("Duidelijke, zelfstandige beschrijving van de wijziging, in het Engels en in het Nederlands."),
       }),
       execute: async ({ request }) => {
-        const r = await startChange(email, request);
+        const r = await startChange(email, request, opts.images?.length ? opts.images : undefined);
         return r.ok ? { runId: r.runId } : { error: r.error };
       },
     }),
