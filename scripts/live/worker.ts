@@ -181,24 +181,75 @@ function writeAttachments(id: string, images?: string[]): string | undefined {
 const lastSentence = (s: string) =>
   s.replace(/```[\s\S]*?```/g, "").split("\n").map((l) => l.trim()).filter(Boolean).pop()?.slice(0, 300);
 
-/** Is the live app answering? Any non-5xx counts (pages are behind login). */
-async function appHealthy(): Promise<boolean> {
+// Prewarm and health need a signed-in request: a Clerk session for PREWARM_EMAIL (Robin), created
+// through the Clerk Backend API and used as a short-lived Bearer token (pages only READ data).
+const PAGES = ["/planning", "/boodschappenlijstje", "/recepten", "/diepvries", "/vleesjes", "/potjes"];
+let clerkSession: string | undefined;
+function clerkKey(): string | undefined {
   try {
-    const res = await fetch(`${CONFIG.appUrl}/`, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
-    return res.status < 500;
+    return /^CLERK_SECRET_KEY=(.+)$/m.exec(readFileSync(join(CONFIG.liveDir, ".env.local"), "utf8"))?.[1].trim();
   } catch {
-    return false;
+    return undefined;
+  }
+}
+async function clerk(path: string, body: unknown) {
+  const res = await fetch(`https://api.clerk.com/v1${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${clerkKey()}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`clerk ${path} ${res.status}`);
+  return res.json();
+}
+async function pageToken(): Promise<string | undefined> {
+  const email = process.env.PREWARM_EMAIL;
+  if (!email || !clerkKey()) return undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (!clerkSession) {
+        const users = await fetch(`https://api.clerk.com/v1/users?email_address=${encodeURIComponent(email)}`, {
+          headers: { Authorization: `Bearer ${clerkKey()}` }, signal: AbortSignal.timeout(10_000),
+        }).then((r) => r.json());
+        clerkSession = (await clerk("/sessions", { user_id: users[0].id })).id;
+      }
+      return (await clerk(`/sessions/${clerkSession}/tokens`, {})).jwt;
+    } catch (e) {
+      log({ clerkTokenError: String(e) });
+      clerkSession = undefined;
+    }
+  }
+  return undefined;
+}
+
+async function getPage(path: string, token?: string): Promise<number> {
+  try {
+    const res = await fetch(`${CONFIG.appUrl}${path}`, {
+      redirect: "manual",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(60_000),
+    });
+    await res.arrayBuffer();
+    return res.status;
+  } catch {
+    return 0;
   }
 }
 
-/** Fetch the main pages so the server compiles them before Amber looks. */
+/** Is the live app answering? Signed in: every main page 200. Otherwise any non-5xx on /. */
+async function appHealthy(): Promise<boolean> {
+  const token = await pageToken();
+  if (!token) return ((await getPage("/")) || 500) < 500;
+  const codes = await Promise.all(PAGES.slice(0, 4).map((p) => getPage(p, token)));
+  if (codes.some((c) => c !== 200)) log({ health: Object.fromEntries(PAGES.map((p, i) => [p, codes[i]])) });
+  return codes.every((c) => c === 200);
+}
+
+/** Request the main pages so the server compiles them before Amber looks. */
 export async function prewarm() {
   const t = Date.now();
-  await Promise.all(
-    ["/", "/planning", "/boodschappenlijstje", "/recepten", "/diepvries", "/vleesjes", "/potjes"].map((p) =>
-      fetch(`${CONFIG.appUrl}${p}`, { redirect: "manual", signal: AbortSignal.timeout(60_000) }).catch(() => {}),
-    ),
-  );
+  const token = await pageToken();
+  await Promise.all(PAGES.map((p) => getPage(p, token)));
   return Date.now() - t;
 }
 
@@ -261,7 +312,6 @@ async function doChange(r: Run, images?: string[]) {
   await git(CONFIG.liveDir, "fetch", "-q", CONFIG.workDir, sha);
   await git(CONFIG.liveDir, "merge", "-q", "--ff-only", sha);
   const ta = Date.now();
-  await prewarm();
   if (!(await appHealthy())) {
     await git(CONFIG.liveDir, "reset", "-q", "--hard", base);
     return set(r, { status: "failed", step: undefined, costUsd: cost, reason: "De app werkte niet meer met deze wijziging; teruggezet", timings: { ...r.timings, totalMs: Date.now() - t0 } });
@@ -372,12 +422,14 @@ function restartApp(why: string) {
 let unhealthy = 0;
 setInterval(async () => {
   if (busy) return;
-  if (await appHealthy()) unhealthy = 0;
+  const token = await pageToken();
+  const ok = token ? (await getPage("/planning", token)) === 200 : ((await getPage("/")) || 500) < 500;
+  if (ok) unhealthy = 0;
   else if (++unhealthy >= 3) {
     unhealthy = 0;
     restartApp("health check failed 3x");
   }
-}, 30_000);
+}, 60_000);
 if (CONFIG.sync) setInterval(() => { if (!busy) enqueue(syncMain).catch((e) => log({ syncError: String(e) })); }, 60_000);
 
 // ---------- HTTP ----------
@@ -442,4 +494,7 @@ createServer(async (req, res) => {
   } catch (e) {
     send(res, 500, { error: String(e).slice(0, 200) });
   }
-}).listen(CONFIG.port, "127.0.0.1", () => log({ listening: CONFIG.port, model: CONFIG.model, live: CONFIG.liveDir }));
+}).listen(CONFIG.port, "127.0.0.1", () => {
+  log({ listening: CONFIG.port, model: CONFIG.model, live: CONFIG.liveDir });
+  prewarm().then((ms) => log({ prewarmMs: ms }));
+});

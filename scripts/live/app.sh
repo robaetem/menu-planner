@@ -4,6 +4,6 @@
 PORT="${1:-3400}"
 while true; do
   echo "[app] start $(date -Is)"
-  ./node_modules/.bin/next dev --turbopack -H 127.0.0.1 --port "$PORT"
+  ./node_modules/.bin/next dev --turbopack -H 0.0.0.0 --port "$PORT"
   echo "[app] exited $? $(date -Is)"; sleep 2
 done
