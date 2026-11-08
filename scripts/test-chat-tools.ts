@@ -379,4 +379,26 @@ async function dbTests() {
     check("undo vleesjes fixture", (await undoReq(fx.undoId)).body.ok === true);
     check("undo restores the exact state (vleesjes)", (await state()) === sH);
   }
+
+  // i. updateRecipe tags (e2e 2026-11-08: "voeg de tag salade toe" wiped 4 tags): addTags/removeTags keep the rest.
+  {
+    const sI = await state();
+    const fx = await post([
+      { op: "createTag", label: "Chattest a" },
+      { op: "createTag", label: "Chattest b" },
+      { op: "createTag", label: "Chattest c" },
+      { op: "createRecipe", title: "Chattest tags", tags: ["Chattest a", "Chattest b"] },
+    ]);
+    check("tags fixture applied", fx.ok === true, fx);
+    const tagsOf = async () => ((await db.from("recipes").select("tags").eq("title", "Chattest tags").maybeSingle()).data?.tags ?? []).slice().sort().join(",");
+    const add = await post([{ op: "updateRecipe", recipe: "Chattest tags", addTags: ["chattest C", "Chattest a"] }]);
+    check("addTags keeps the existing tags (case-insensitive, no duplicates)", add.ok === true && (await tagsOf()) === "chattest a,chattest b,chattest c", { add, tags: await tagsOf() });
+    check("summary states the resulting tags", /tags nu: Chattest a, Chattest b, Chattest c/.test(add.summary), add);
+    const rem = await post([{ op: "updateRecipe", recipe: "Chattest tags", removeTags: ["Chattest b"] }]);
+    check("removeTags removes only that tag", rem.ok === true && (await tagsOf()) === "chattest a,chattest c", { rem, tags: await tagsOf() });
+    const rep = await post([{ op: "updateRecipe", recipe: "Chattest tags", tags: ["Chattest b"] }]);
+    check("tags replaces the whole list", rep.ok === true && (await tagsOf()) === "chattest b", rep);
+    for (const x of [rep, rem, add, fx]) await undoReq(x.undoId);
+    check("undo restores the exact state (tags)", (await state()) === sI);
+  }
 }

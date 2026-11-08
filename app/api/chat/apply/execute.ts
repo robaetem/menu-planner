@@ -348,16 +348,27 @@ export async function runOp(db: SupabaseClient, op: Op): Promise<string> {
         ingredients = ingredients.map((i) => (i === hit ? next : i));
       }
       for (const a of op.addIngredients ?? []) ingredients.push(ingredientRow(a, ingredients.length));
+      // addTags / removeTags change the existing list; `tags` replaces it.
+      let tags: string[] = op.tags ? await tagValues(db, op.tags) : [...(r.tags ?? [])];
+      for (const t of await tagValues(db, op.addTags ?? [])) if (!tags.some((x) => norm(x) === norm(t))) tags.push(t);
+      const gone = (await tagValues(db, op.removeTags ?? [])).map(norm);
+      tags = tags.filter((t) => !gone.includes(norm(t)));
       const input: RecipeInput = {
         title: op.title ?? r.title,
-        tags: op.tags ? await tagValues(db, op.tags) : r.tags,
+        tags,
         method: op.method !== undefined ? op.method.trim() || null : r.method,
         notes: op.notes !== undefined ? op.notes.trim() || null : r.notes,
         has_vleesje: op.hasVleesje ?? r.has_vleesje,
         ingredients: ingredients.map((i, k) => ({ ...i, sort: k })),
       };
       await updateRecipe(r.id, input);
-      return `Recept ${r.title} aangepast`;
+      let line = `Recept ${r.title} aangepast`;
+      if (op.tags || op.addTags || op.removeTags) {
+        const labels = await rows<any>(db.from("recipe_tags").select("value, label"));
+        const names = tags.map((t) => labels.find((l) => norm(l.value) === norm(t))?.label ?? t);
+        line += `, tags nu: ${names.join(", ") || "geen"}`;
+      }
+      return line;
     }
     case "deleteRecipe": {
       // Not the screen's deleteRecipe: that also removes the photo file, which
