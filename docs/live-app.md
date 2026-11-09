@@ -3,8 +3,9 @@
 Amber's app runs on the devbox as a persistent `next dev` (Turbopack, hot reload) on the same
 production Supabase and Clerk as the Vercel app. A change she asks for in the chat is made by a
 local coding worker and shows in her app in about 20-35 s; undo takes about 2 s. Every accepted change
-is also sent to `main` as a pull request with auto-merge, so the Vercel app catches up as a fallback.
-The Vercel app keeps the old GitHub Actions flow (no `LIVE_WORKER_URL` there).
+is also pushed to `main` with the repo's deploy key, so the Vercel app catches up as a fallback.
+No GitHub token is involved (agents may not hold a founder's login, CC-11). The Vercel app keeps the
+old GitHub Actions flow (no `LIVE_WORKER_URL` there).
 
 ## Flow
 
@@ -21,13 +22,12 @@ The Vercel app keeps the old GitHub Actions flow (no `LIVE_WORKER_URL` there).
    - `tsc --noEmit` and ESLint on the touched files; one fix round by the agent if they fail;
    - fast-forwards the live checkout (hot reload), loads the main pages signed in and checks they
      answer 200, else resets the live checkout to the previous commit;
-   - in the background pushes `change/<id>`, opens a PR and arms auto-merge (the repo's
-     `guardrail` and `build` checks still run there).
-4. Undo: `git revert` on the live checkout (hot reload), then close the PR if it is still open, or
-   open a revert PR with auto-merge if it was merged.
-5. Every minute, when idle and none of its PRs are still open, the worker moves the live checkout to
-   `origin/main` (and reinstalls dependencies and restarts the app if they changed). A PR whose checks
-   fail is closed, so the change leaves the live app at the next sync.
+   - in the background pushes that commit to `main` over SSH with the write deploy key
+     `~/.ssh/menu_planner_deploy` (`LIVE_PUSH_REMOTE` overrides the remote), so Vercel builds it.
+4. Undo: `git revert` on the live checkout (hot reload), then push the revert commit to `main` the
+   same way. A change that never reached `main` has nothing to undo there.
+5. Every minute, when idle and none of its pushes is still on its way, the worker moves the live
+   checkout to `origin/main` (and reinstalls dependencies and restarts the app if they changed).
 
 The card in the chat shows the real state: "Bezig: code aanpassen…", "Bezig: controleren…",
 "Staat erin in 23 s", "Ongedaan maken", "Ongedaan gemaakt in 2 s".

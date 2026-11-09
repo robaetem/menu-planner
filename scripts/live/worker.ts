@@ -1,7 +1,8 @@
 /* Live-app coding worker (devbox only). See docs/live-app.md.
    One change at a time: coding agent in a Docker sandbox edits WORK_DIR -> trusted guardrail ->
-   type check + lint -> fast-forward LIVE_DIR (the running app picks it up) -> background PR with
-   auto-merge so Vercel prod catches up. Undo = git revert on LIVE_DIR + background PR/close.
+   type check + lint -> fast-forward LIVE_DIR (the running app picks it up) -> background push of
+   that commit to main with the repo's deploy key, so Vercel prod catches up. Undo = git revert on
+   LIVE_DIR + background push of the revert commit. No GitHub token is involved (CC-11).
    Run: npx tsx scripts/live/worker.ts   (env: see CONFIG below) */
 import { execFile, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -42,6 +43,8 @@ type Run = {
   sha?: string;
   baseSha?: string;
   revertSha?: string;
+  pushedSha?: string;
+  // Older runs carry the PR links of the gh-based flow; nothing writes them any more.
   prNumber?: number;
   prUrl?: string;
   revertPrUrl?: string;
@@ -91,11 +94,14 @@ async function git(dir: string, ...args: string[]) {
   if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${r.out.slice(-400)}`);
   return r.out.trim();
 }
-const GH_ENV = { ...process.env, GH_CONFIG_DIR: process.env.GH_CONFIG_DIR ?? `${process.env.HOME}/.config/gh-robaetem` };
-delete (GH_ENV as any).GH_TOKEN;
-const gh = (...args: string[]) => sh("gh", args, { env: GH_ENV, timeout: 60_000 });
-const gitPush = (dir: string, ...args: string[]) =>
-  sh("git", ["-c", `credential.helper=`, "-c", `credential.helper=!gh auth git-credential`, "push", ...args], { cwd: dir, env: GH_ENV });
+// Pushing to main goes over SSH with a repo-scoped deploy key (write access, this repo only).
+// Agents hold no founder token (CC-11) and gh is not logged in here.
+const PUSH_REMOTE = env("LIVE_PUSH_REMOTE", `git@github.com:${CONFIG.repo}.git`);
+const PUSH_ENV = {
+  ...process.env,
+  GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? `ssh -i ${process.env.HOME}/.ssh/menu_planner_deploy -o IdentitiesOnly=yes`,
+};
+const gitPush = (dir: string, ...args: string[]) => sh("git", ["push", ...args], { cwd: dir, env: PUSH_ENV });
 
 // Serial queue: changes, undos and syncs never overlap.
 let chain: Promise<unknown> = Promise.resolve();
@@ -321,27 +327,22 @@ async function doChange(r: Run, images?: string[]) {
   if (CONFIG.push) bg(publishChange(r));
 }
 
-async function publishChange(r: Run) {
-  const branch = `change/${r.id}`;
-  const p = await gitPush(CONFIG.liveDir, "-q", "-f", "origin", `${r.sha}:refs/heads/${branch}`);
-  if (p.code !== 0) return log({ run: r.id, pushFailed: p.out.slice(-300) });
-  const body = `${r.summary ?? ""}\n\n---\nAanvraag: ${r.request}\nGemaakt in de live app (devbox worker, model ${CONFIG.model}). Al live in de devbox-app; deze PR brengt het naar Vercel.`;
-  const pr = await gh("pr", "create", "-R", CONFIG.repo, "--base", "main", "--head", branch, "--title", (r.summary ?? `Wijziging ${r.id}`).slice(0, 70), "--body", body);
-  const url = pr.out.match(/https:\/\/github\.com\/\S+\/pull\/(\d+)/);
-  if (!url) return log({ run: r.id, prFailed: pr.out.slice(-300) });
-  set(r, { prUrl: url[0], prNumber: Number(url[1]) });
-  await armAutoMerge(r, url[0]);
+/** Put a commit on main. Vercel builds every push to main, so prod follows within minutes. */
+async function pushToMain(r: Run, sha: string, what: "change" | "revert") {
+  const p = await gitPush(CONFIG.liveDir, "-q", PUSH_REMOTE, `${sha}:refs/heads/main`);
+  if (p.code !== 0) {
+    // Main moved on (or the deploy key lost its write access): say so instead of pretending.
+    log({ run: r.id, pushFailed: what, out: p.out.slice(-300) });
+    set(r, { reason: "Niet naar Vercel gebracht: de push naar main lukte niet" });
+    return false;
+  }
+  log({ run: r.id, pushed: what, sha });
+  return true;
 }
 
-/** Right after `pr create` GitHub may not know yet whether the PR can merge; retry a few times. */
-async function armAutoMerge(r: Run, url: string) {
-  for (let i = 0; i < 4; i++) {
-    const m = await gh("pr", "merge", "-R", CONFIG.repo, url, "--auto", "--squash");
-    const on = await gh("pr", "view", "-R", CONFIG.repo, url, "--json", "autoMergeRequest,state", "--jq", '.state + " " + (.autoMergeRequest != null | tostring)');
-    if (/MERGED| true/.test(on.out)) return;
-    if (i === 3) return log({ run: r.id, autoMergeFailed: url, out: m.out.slice(-300) });
-    await new Promise((res) => setTimeout(res, 5_000));
-  }
+async function publishChange(r: Run) {
+  if (!r.sha) return;
+  if (await pushToMain(r, r.sha, "change")) set(r, { pushedSha: r.sha });
 }
 
 // ---------- undo ----------
@@ -362,35 +363,14 @@ async function doUndo(r: Run) {
 }
 
 async function publishUndo(r: Run) {
-  await Promise.all(background); // the change's own PR must exist first
-  if (!r.prNumber) return;
-  const st = await gh("pr", "view", "-R", CONFIG.repo, String(r.prNumber), "--json", "state", "--jq", ".state");
-  if (st.out.trim() === "OPEN") {
-    await gh("pr", "close", "-R", CONFIG.repo, String(r.prNumber), "--delete-branch", "--comment", "Ongedaan gemaakt in de live app.");
+  await Promise.all(background); // the change itself must be on main first
+  if (!r.revertSha) return;
+  if (!r.pushedSha) {
+    // The change never reached main, so there is nothing to take back there.
+    log({ run: r.id, undo: "not on main, nothing to push" });
     return;
   }
-  if (st.out.trim() !== "MERGED") return;
-  // The change reached main as a squash commit, not as r.sha: revert that commit on top of main,
-  // else the revert PR has an empty diff and Vercel keeps the change.
-  const squash = (await gh("pr", "view", "-R", CONFIG.repo, String(r.prNumber), "--json", "mergeCommit", "--jq", ".mergeCommit.oid")).out.trim();
-  let commit: string;
-  try {
-    await git(CONFIG.liveDir, "fetch", "-q", "origin", "main");
-    const main = await git(CONFIG.liveDir, "rev-parse", "origin/main");
-    const tree = (await git(CONFIG.liveDir, "merge-tree", "--write-tree", `--merge-base=${squash}`, main, `${squash}^`)).split("\n")[0];
-    commit = await git(CONFIG.liveDir, "-c", "user.name=menu-planner-bot", "-c", "user.email=menu-planner-bot@users.noreply.github.com",
-      "commit-tree", tree, "-p", main, "-m", `Ongedaan: ${(r.summary ?? r.id).slice(0, 55)} (#${r.prNumber})`);
-  } catch (e) {
-    return log({ run: r.id, revertFailed: String(e).slice(-300) });
-  }
-  const branch = `revert/${r.id}`;
-  const p = await gitPush(CONFIG.liveDir, "-q", "-f", "origin", `${commit}:refs/heads/${branch}`);
-  if (p.code !== 0) return log({ run: r.id, pushFailed: p.out.slice(-300) });
-  const pr = await gh("pr", "create", "-R", CONFIG.repo, "--base", "main", "--head", branch, "--title", `Ongedaan: ${(r.summary ?? r.id).slice(0, 55)}`, "--body", `Draait #${r.prNumber} terug (ongedaan gemaakt in de live app).`);
-  const url = pr.out.match(/https:\/\/github\.com\/\S+\/pull\/\d+/);
-  if (!url) return log({ run: r.id, prFailed: pr.out.slice(-300) });
-  set(r, { revertPrUrl: url[0] });
-  await armAutoMerge(r, url[0]);
+  await pushToMain(r, r.revertSha, "revert");
 }
 
 // ---------- sync with main ----------
@@ -399,18 +379,12 @@ async function syncMain() {
   await Promise.all(background);
   await git(CONFIG.liveDir, "fetch", "-q", "origin", "main");
   const [head, main] = await Promise.all([git(CONFIG.liveDir, "rev-parse", "HEAD^{tree}"), git(CONFIG.liveDir, "rev-parse", "origin/main^{tree}")]);
-  const pending = [...runs.values()].filter((r) => (r.prNumber && (r.status === "live" || r.status === "undone")) && !r.timings.settled);
+  const pending = [...runs.values()].filter((r) => ((r.status === "live" && r.pushedSha) || (r.status === "undone" && r.revertSha)) && !r.timings.settled);
   for (const r of pending) {
-    const st = (await gh("pr", "view", "-R", CONFIG.repo, String(r.revertPrUrl ?? r.prNumber), "--json", "state,statusCheckRollup",
-      "--jq", '.state + " " + ([.statusCheckRollup[]? | select(.conclusion=="FAILURE")] | length | tostring)')).out.trim();
-    const [state, failed] = st.split(" ");
-    if (state === "MERGED" || state === "CLOSED") r.timings.settled = Date.now();
-    else if (state === "OPEN" && Number(failed) > 0) {
-      await gh("pr", "close", "-R", CONFIG.repo, String(r.revertPrUrl ?? r.prNumber), "--comment", "Controle online faalde; niet naar Vercel gebracht.");
-      r.timings.settled = Date.now();
-      if (r.status === "live") r.reason = "Online controle faalde; Robin kijkt ernaar";
-      log({ run: r.id, closedFailedPr: r.prNumber });
-    }
+    // Settled once our commit is part of main: main was fast-forwarded to it on push.
+    const sha = r.status === "undone" ? r.revertSha! : r.pushedSha!;
+    const onMain = (await sh("git", ["merge-base", "--is-ancestor", sha, "origin/main"], { cwd: CONFIG.liveDir })).code === 0;
+    if (onMain) r.timings.settled = Date.now();
   }
   save();
   const open = pending.filter((r) => !r.timings.settled);
