@@ -29,7 +29,6 @@ import { Label } from "@/components/ui/label";
 import { NameAutocomplete } from "@/components/name-autocomplete";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatMonthDay } from "@/lib/date";
-import { cn } from "@/lib/utils";
 import {
   formatGroenteQuantity,
   GROENTE_UNITS,
@@ -37,8 +36,8 @@ import {
   type GroenteUnit,
 } from "@/lib/freezer/inventory";
 import type { Groente } from "@/lib/types";
-import { entryStatus, type FreezerStock } from "@/lib/freezer/stock";
-import { HiddenPlanned, NoneFree, OnlyFreeBar, StockPlanned } from "@/components/stock-status";
+import type { FreezerStock } from "@/lib/freezer/stock";
+import { StockPlanned } from "@/components/stock-status";
 import { createGroente, deleteGroente, updateGroente } from "./actions";
 
 export function GroentenView({
@@ -58,7 +57,6 @@ export function GroentenView({
 }) {
   const [editing, setEditing] = React.useState<Groente | null>(null);
   const [deleting, setDeleting] = React.useState<Groente | null>(null);
-  const [onlyFree, setOnlyFree] = React.useState(true);
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -73,21 +71,6 @@ export function GroentenView({
       }
     });
   }
-
-  const qty = (g: Groente, n: number) => formatGroenteQuantity(n, normalizeGroenteUnit(g.unit));
-  const rows = groenten.map((g) => {
-    const entry = stock.entries.find((e) => e.id === g.id);
-    const total = Number(g.amount ?? g.count);
-    return { g, total, free: entry ? entryStatus(entry, stock.reservations).free : total };
-  });
-  // Free totals per unit ("300 gram · 2 stuks"): units can't be added together.
-  const freeByUnit = new Map<GroenteUnit, number>();
-  for (const r of rows) {
-    const unit = normalizeGroenteUnit(r.g.unit);
-    freeByUnit.set(unit, (freeByUnit.get(unit) ?? 0) + Math.max(0, r.free));
-  }
-  const freeSummary = [...freeByUnit.entries()].filter(([, n]) => n > 0).map(([u, n]) => formatGroenteQuantity(n, u));
-  const shown = onlyFree ? rows.filter((r) => r.free > 0) : rows;
 
   return (
     <div>
@@ -106,69 +89,40 @@ export function GroentenView({
           </Button>
         </div>
       ) : (
-        <>
-          <div className="mt-6">
-            <OnlyFreeBar
-              onlyFree={onlyFree}
-              onChange={setOnlyFree}
-              summary={
-                <span>
-                  <span className="text-2xl font-semibold tabular-nums text-foreground">
-                    {freeSummary.length ? freeSummary.join(" · ") : "0"}
-                  </span>{" "}
-                  vrij
-                </span>
-              }
-            />
-          </div>
-          {shown.length === 0 ? (
-            <NoneFree>Alles in de diepvries is al ingepland.</NoneFree>
-          ) : (
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {shown.map(({ g: groente, free, total }) => (
-                <div
-                  key={groente.id}
-                  className={cn("rounded-xl border p-4", free <= 0 ? "border-dashed bg-muted/30" : "bg-card")}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-                      <p className={cn("font-medium", free <= 0 && "text-muted-foreground")}>{groente.name}</p>
-                      <span className="text-xs text-muted-foreground">{formatMonthDay(groente.created_at)}</span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => setEditing(groente)} aria-label={`${groente.name} bewerken`}>
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setDeleting(groente)}
-                        className="text-muted-foreground hover:text-destructive"
-                        aria-label={`${groente.name} verwijderen`}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-2 space-y-1.5">
-                    <p className={cn("tabular-nums", free <= 0 ? "text-base text-muted-foreground" : "text-xl font-semibold")}>
-                      {qty(groente, Math.max(0, free))} <span className="text-sm font-normal text-muted-foreground">vrij</span>
-                    </p>
-                    <StockPlanned
-                      entry={stock.entries.find((e) => e.id === groente.id)}
-                      stock={stock}
-                      format={(n) => qty(groente, n)}
-                    />
-                    {free > 0 && total - free > 0 && (
-                      <p className="text-xs text-muted-foreground">{qty(groente, total)} in de diepvries</p>
-                    )}
-                  </div>
+        <div className="mt-6 space-y-3">
+          {groenten.map((groente) => (
+            <div key={groente.id} className="flex items-center justify-between gap-4 rounded-xl border bg-card p-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                  <p className="font-medium">{groente.name}</p>
+                  <span className="text-xs text-muted-foreground">{formatMonthDay(groente.created_at)}</span>
                 </div>
-              ))}
+                <p className="mt-2 text-lg font-semibold tabular-nums">
+                  {formatGroenteQuantity(Number(groente.amount ?? groente.count), normalizeGroenteUnit(groente.unit))}
+                </p>
+                <StockPlanned
+                  entry={stock.entries.find((e) => e.id === groente.id)}
+                  stock={stock}
+                  format={(n) => formatGroenteQuantity(n, normalizeGroenteUnit(groente.unit))}
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="ghost" size="icon-sm" onClick={() => setEditing(groente)} aria-label={`${groente.name} bewerken`}>
+                  <Pencil className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setDeleting(groente)}
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={`${groente.name} verwijderen`}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             </div>
-          )}
-          <HiddenPlanned count={onlyFree ? rows.length - shown.length : 0} onShow={() => setOnlyFree(false)} />
-        </>
+          ))}
+        </div>
       )}
 
       <GroenteDialog open={adding} onOpenChange={onAddingChange} groente={null} groenteNames={groenteNames} />

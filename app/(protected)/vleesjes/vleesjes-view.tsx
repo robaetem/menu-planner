@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Beef } from "lucide-react";
+import { Plus, Minus, Trash2, Beef } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,10 +28,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { NameAutocomplete } from "@/components/name-autocomplete";
 import { formatMonthDay } from "@/lib/date";
-import { cn } from "@/lib/utils";
 import type { Vleesje } from "@/lib/types";
-import { entryStatus, type FreezerStock } from "@/lib/freezer/stock";
-import { FreeCount, HiddenPlanned, NoneFree, OnlyFreeBar, StockPlanned } from "@/components/stock-status";
+import type { FreezerStock } from "@/lib/freezer/stock";
+import { StockPlanned } from "@/components/stock-status";
 import { createVleesje, deleteVleesje, setVleesjeCount } from "./actions";
 
 export function VleesjesView({
@@ -50,7 +49,6 @@ export function VleesjesView({
   onAddingChange: (open: boolean) => void;
 }) {
   const [deleting, setDeleting] = React.useState<Vleesje | null>(null);
-  const [onlyFree, setOnlyFree] = React.useState(true);
   const router = useRouter();
   const [, start] = useTransition();
 
@@ -69,13 +67,6 @@ export function VleesjesView({
   // A batch at 0 is out of the freezer; it isn't listed.
   const vleesjes = allVleesjes.filter((v) => v.count > 0);
   const pieces = (n: number) => String(n);
-  const rows = vleesjes.map((v) => {
-    const entry = stock.entries.find((e) => e.id === v.id);
-    return { v, free: entry ? entryStatus(entry, stock.reservations).free : v.count };
-  });
-  const freeTotal = rows.reduce((sum, r) => sum + r.free, 0);
-  const plannedTotal = rows.reduce((sum, r) => sum + r.v.count - r.free, 0);
-  const shown = onlyFree ? rows.filter((r) => r.free > 0) : rows;
 
   return (
     <div>
@@ -94,58 +85,29 @@ export function VleesjesView({
           </Button>
         </div>
       ) : (
-        <>
-          <div className="mt-6">
-            <OnlyFreeBar
-              onlyFree={onlyFree}
-              onChange={setOnlyFree}
-              summary={
-                <span>
-                  <span className="text-2xl font-semibold tabular-nums text-foreground">{freeTotal}</span> vrij
-                  {plannedTotal > 0 && <span> · {plannedTotal} ingepland</span>}
-                </span>
-              }
-            />
-          </div>
-          {shown.length === 0 ? (
-            <NoneFree>Alles in de diepvries is al ingepland.</NoneFree>
-          ) : (
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {shown.map(({ v, free }) => (
-                <div
-                  key={v.id}
-                  className={cn("rounded-xl border p-4", free <= 0 ? "border-dashed bg-muted/30" : "bg-card")}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-                      <p className={cn("font-medium", free <= 0 && "text-muted-foreground")}>{v.name}</p>
-                      <span className="text-xs text-muted-foreground">{formatMonthDay(v.created_at)}</span>
-                    </div>
-                    <button
-                      onClick={() => setDeleting(v)}
-                      className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
-                      aria-label={`${v.name} verwijderen`}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-1.5">
-                    <FreeCount
-                      free={pieces(free)}
-                      total={v.count}
-                      caption="in de diepvries"
-                      ariaLabel={`${v.name}: ${free} vrij, aanpassen`}
-                      onAdd={() => run(() => setVleesjeCount(v.id, v.count + 1))}
-                      onRemove={() => run(() => setVleesjeCount(v.id, Math.max(0, v.count - 1)))}
-                    />
-                    <StockPlanned entry={stock.entries.find((e) => e.id === v.id)} stock={stock} format={pieces} />
-                  </div>
+        <div className="mt-6 space-y-3">
+          {vleesjes.map((v) => (
+            <div key={v.id} className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                  <p className="font-medium">{v.name}</p>
+                  <span className="text-xs text-muted-foreground">{formatMonthDay(v.created_at)}</span>
                 </div>
-              ))}
+                <div className="mt-2">
+                  <CountStepper value={v.count} onChange={(n) => run(() => setVleesjeCount(v.id, n))} />
+                </div>
+                <StockPlanned entry={stock.entries.find((e) => e.id === v.id)} stock={stock} format={pieces} />
+              </div>
+              <button
+                onClick={() => setDeleting(v)}
+                className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+                aria-label={`${v.name} verwijderen`}
+              >
+                <Trash2 className="size-4" />
+              </button>
             </div>
-          )}
-          <HiddenPlanned count={onlyFree ? rows.length - shown.length : 0} onShow={() => setOnlyFree(false)} />
-        </>
+          ))}
+        </div>
       )}
 
       <NewVleesjeDialog open={adding} onOpenChange={onAddingChange} vleesjeNames={vleesjeNames} />
@@ -172,6 +134,20 @@ export function VleesjesView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function CountStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-lg border px-2 py-1">
+      <Button variant="ghost" size="icon-sm" onClick={() => onChange(Math.max(0, value - 1))} disabled={value <= 0} aria-label="Minder">
+        <Minus className="size-3.5" />
+      </Button>
+      <span className="min-w-8 text-center text-sm font-medium tabular-nums">{value}</span>
+      <Button variant="ghost" size="icon-sm" onClick={() => onChange(value + 1)} aria-label="Meer">
+        <Plus className="size-3.5" />
+      </Button>
     </div>
   );
 }
